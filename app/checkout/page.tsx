@@ -209,7 +209,23 @@ export default function CheckoutPage() {
         },
       };
 
-      const rzp = new window.Razorpay(options);
+      if (typeof window !== 'undefined' && !(window as any).Razorpay) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement('script');
+          s.id = 'razorpay-script-dynamic';
+          s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error('Failed to load Razorpay payment SDK. Check your internet connection.'));
+          document.body.appendChild(s);
+        });
+      }
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', function (response: any) {
+        setLoading(false);
+        const reason = response.error?.description || response.error?.reason || 'Payment failed';
+        setError(`Payment failed: ${reason}. Please try a different card or UPI method.`);
+      });
       rzp.open();
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.');
