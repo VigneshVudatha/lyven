@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Palette, Heart, ShoppingBag, User, Menu, X } from 'lucide-react';
+import { Palette, Heart, ShoppingBag, User, Package, Menu, X } from 'lucide-react';
 import { useCartStore } from '@/lib/cart/store';
 import { useWishlistStore } from '@/lib/wishlist/store';
 import HeaderSearch from '@/components/layout/HeaderSearch';
@@ -65,7 +65,7 @@ export default function Header() {
               <HeaderSearch />
             </div>
 
-            {/* Right: Icon Buttons Group (Palette, Heart, Cart, User) */}
+            {/* Right: Icon Buttons Group (Palette, Heart, Cart, My Orders, User) */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               {/* Custom Design Studio Palette Icon */}
               <Link
@@ -114,6 +114,19 @@ export default function Header() {
                     {cartCount}
                   </span>
                 )}
+              </Link>
+
+              {/* My Orders Icon Button */}
+              <Link
+                href="/my-orders"
+                title="My Orders"
+                className={cn(
+                  'p-2 sm:p-2.5 rounded-full text-neutral-300 hover:text-[#C9A45C] hover:bg-white/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A45C]',
+                  pathname === '/my-orders' && 'text-[#C9A45C] bg-white/15'
+                )}
+                aria-label="My Orders"
+              >
+                <Package className="w-5 h-5 stroke-[1.75]" />
               </Link>
 
               {/* User Account Icon */}
@@ -195,11 +208,20 @@ export default function Header() {
                 <span>Bag ({mounted ? cartCount : 0})</span>
               </Link>
               <Link
+                href="/my-orders"
+                onClick={() => setMenuOpen(false)}
+                className="px-3.5 py-3 rounded-xl bg-white/[0.06] border border-white/10 text-[#FAF8F3] text-center hover:bg-white/10 active:scale-98 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Package className="w-4 h-4 text-[#C9A45C]" />
+                <span>My Orders</span>
+              </Link>
+              <Link
                 href="/account"
                 onClick={() => setMenuOpen(false)}
-                className="col-span-2 px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-neutral-300 text-center hover:bg-white/10 active:scale-98 transition-all"
+                className="px-3.5 py-3 rounded-xl bg-white/[0.06] border border-white/10 text-[#FAF8F3] text-center hover:bg-white/10 active:scale-98 transition-all flex items-center justify-center gap-1.5"
               >
-                Customer Account
+                <User className="w-4 h-4 text-[#C9A45C]" />
+                <span>Account</span>
               </Link>
             </div>
           </nav>

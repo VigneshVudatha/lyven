@@ -91,6 +91,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   orderRef: string;
+  userId?: string;
   customer: OrderAddress;
   items: OrderItem[];
   subtotalPaise: number;

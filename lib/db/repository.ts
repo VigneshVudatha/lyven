@@ -683,6 +683,7 @@ function mapRowToOrder(row: any): Order {
   return {
     id: row.id,
     orderRef: row.order_ref,
+    userId: row.user_id || undefined,
     customer: {
       fullName: row.customer_full_name,
       mobile: row.customer_mobile,
@@ -733,7 +734,7 @@ export async function saveOrder(order: Order & { idempotencyKey: string }): Prom
     try {
       const supabase = getSupabaseAdmin();
       // 1. Insert order
-      const { error: orderErr } = await supabase.from('orders').insert({
+      const insertPayload: any = {
         id: order.id,
         order_ref: order.orderRef,
         customer_full_name: order.customer.fullName,
@@ -756,7 +757,21 @@ export async function saveOrder(order: Order & { idempotencyKey: string }): Prom
         idempotency_key: order.idempotencyKey,
         created_at: order.createdAt,
         updated_at: order.updatedAt,
-      });
+      };
+
+      if (order.userId) {
+        insertPayload.user_id = order.userId;
+      }
+
+      let { error: orderErr } = await supabase.from('orders').insert(insertPayload);
+
+      // Graceful fallback if database user_id migration has not yet been executed
+      if (orderErr && orderErr.message?.includes('user_id') && insertPayload.user_id) {
+        console.warn('[Supabase] user_id column not yet present, retrying without user_id:', orderErr.message);
+        delete insertPayload.user_id;
+        const retry = await supabase.from('orders').insert(insertPayload);
+        orderErr = retry.error;
+      }
 
       if (orderErr) {
         console.error('[Supabase] Failed to save order:', orderErr.message);
@@ -962,6 +977,33 @@ export async function getAllOrders(): Promise<Order[]> {
   return Array.from(inMemoryOrders.values()).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+}
+
+export async function getOrdersByUserId(userId: string): Promise<Order[]> {
+  if (!userId) return [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getSupabaseAdmin();
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, order_items(*)')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        const orders = data.map(mapRowToOrder);
+        orders.forEach((o) => inMemoryOrders.set(o.id, o));
+        return orders;
+      }
+    } catch (err) {
+      console.warn('[Supabase] getOrdersByUserId error, using memory:', err);
+    }
+  }
+
+  return Array.from(inMemoryOrders.values())
+    .filter((o) => o.userId === userId)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 // ====================================================================

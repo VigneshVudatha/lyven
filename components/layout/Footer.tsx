@@ -59,6 +59,16 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/my-orders" className="text-[#D4D4D8] hover:text-[#C9A45C] transition-colors">
+                  My Orders
+                </Link>
+              </li>
+              <li>
+                <Link href="/account" className="text-[#D4D4D8] hover:text-[#FAF8F3] transition-colors">
+                  Customer Account
+                </Link>
+              </li>
+              <li>
                 <Link href="/track" className="text-[#D4D4D8] hover:text-[#FAF8F3] transition-colors">
                   Track Shipment
                 </Link>

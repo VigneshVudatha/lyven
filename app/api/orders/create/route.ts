@@ -14,6 +14,7 @@ import {
   inMemoryPayments as payments,
 } from '@/lib/db/repository';
 import { sendAdminOrderNotification, sendCustomerOrderConfirmation } from '@/lib/email/notifications';
+import { createClient } from '@/lib/supabase/server';
 
 export async function POST(req: NextRequest) {
   try {
@@ -158,10 +159,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Securely extract authenticated customer user_id from server session cookies
+    // (Never trusting or relying on client browser payload for ownership)
+    let authenticatedUserId: string | undefined;
+    try {
+      const supabaseUserClient = await createClient();
+      const {
+        data: { user: authUser },
+      } = await supabaseUserClient.auth.getUser();
+      if (authUser?.id) {
+        authenticatedUserId = authUser.id;
+      }
+    } catch {
+      // Unauthenticated checkout proceeds safely as guest
+    }
+
     // Create order
     const order: Order & { idempotencyKey: string } = {
       id: orderId,
       orderRef,
+      userId: authenticatedUserId,
       customer: {
         fullName: sanitize(body.customer.fullName),
         mobile: body.customer.mobile,
