@@ -43,10 +43,10 @@ export async function POST(req: NextRequest) {
               });
 
             if (!uploadErr) {
-              const { data: urlData } = supabase.storage
+              const { data: signedData } = await supabase.storage
                 .from('custom-designs')
-                .getPublicUrl(safeName);
-              referenceFileUrl = urlData.publicUrl;
+                .createSignedUrl(safeName, 60 * 60 * 24 * 7); // 7-day signed URL for private studio review
+              referenceFileUrl = signedData?.signedUrl;
             } else {
               console.warn('[Supabase Storage] Custom design upload warning:', uploadErr.message);
             }

@@ -206,6 +206,11 @@ DECLARE
     v_curr_qty INTEGER;
     v_new_qty INTEGER;
 BEGIN
+    -- Validate quantity is strictly positive
+    IF p_quantity <= 0 THEN
+        RAISE EXCEPTION 'Deduction quantity must be greater than zero (received: %)', p_quantity;
+    END IF;
+
     -- Lock row for update to prevent concurrent overselling
     SELECT product_id, quantity INTO v_product_id, v_curr_qty
     FROM public.product_variants
@@ -255,6 +260,10 @@ BEGIN
 END;
 $$;
 
+-- Restrict execution to trusted server-side service_role only
+REVOKE EXECUTE ON FUNCTION public.deduct_variant_stock(TEXT, INTEGER, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.deduct_variant_stock(TEXT, INTEGER, TEXT) TO service_role;
+
 -- Atomic stock restoration on order cancellation
 CREATE OR REPLACE FUNCTION public.restore_variant_stock(
     p_variant_id TEXT,
@@ -271,6 +280,16 @@ DECLARE
     v_curr_qty INTEGER;
     v_new_qty INTEGER;
 BEGIN
+    -- Validate quantity is strictly positive
+    IF p_quantity <= 0 THEN
+        RAISE EXCEPTION 'Restoration quantity must be greater than zero (received: %)', p_quantity;
+    END IF;
+
+    -- Validate reason is an authorized audit value
+    IF p_reason NOT IN ('ORDER_CANCELLED', 'MANUAL_RESTOCK', 'MANUAL_ADJUSTMENT', 'INITIAL_IMPORT') THEN
+        RAISE EXCEPTION 'Invalid restoration reason: %', p_reason;
+    END IF;
+
     SELECT product_id, quantity INTO v_product_id, v_curr_qty
     FROM public.product_variants
     WHERE id = p_variant_id
@@ -312,6 +331,10 @@ BEGIN
     );
 END;
 $$;
+
+-- Restrict execution to trusted server-side service_role only
+REVOKE EXECUTE ON FUNCTION public.restore_variant_stock(TEXT, INTEGER, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.restore_variant_stock(TEXT, INTEGER, TEXT, TEXT) TO service_role;
 
 -- ====================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -374,21 +397,24 @@ CREATE POLICY "Service role full access custom_design_enquiries" ON public.custo
 -- ====================================================================
 -- STORAGE BUCKETS CONFIGURATION
 -- ====================================================================
+
+-- 1. Public bucket for storefront product catalog images
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('lyven-products', 'lyven-products', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
+-- 2. PRIVATE bucket for customer custom design artwork and reference files
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('custom-designs', 'custom-designs', true)
-ON CONFLICT (id) DO UPDATE SET public = true;
+VALUES ('custom-designs', 'custom-designs', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
 
--- Storage policies: Public read for products
+-- Storage policies: Public can ONLY read product catalog assets
 DROP POLICY IF EXISTS "Public read product assets" ON storage.objects;
 CREATE POLICY "Public read product assets"
     ON storage.objects FOR SELECT
-    USING (bucket_id IN ('lyven-products', 'custom-designs'));
+    USING (bucket_id = 'lyven-products');
 
--- Service role full access to storage
+-- Service role has full access to manage all storage buckets (uploads, signed URL generation, management)
 DROP POLICY IF EXISTS "Service role manage storage" ON storage.objects;
 CREATE POLICY "Service role manage storage"
     ON storage.objects FOR ALL TO service_role
