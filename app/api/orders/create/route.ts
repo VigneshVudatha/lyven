@@ -13,6 +13,7 @@ import {
   inMemoryOrders as orders,
   inMemoryPayments as payments,
 } from '@/lib/db/repository';
+import { sendAdminOrderNotification, sendCustomerOrderConfirmation } from '@/lib/email/notifications';
 
 export async function POST(req: NextRequest) {
   try {
@@ -188,8 +189,18 @@ export async function POST(req: NextRequest) {
       idempotencyKey: body.idempotencyKey,
     };
 
-    // Store order (Firestore with in-memory fallback)
+    // Store order in Supabase
     await saveOrder(order);
+
+    // Asynchronously dispatch transactional notifications (non-blocking)
+    sendAdminOrderNotification(order).catch((err) =>
+      console.warn('[Notifications] Failed to send admin alert:', err?.message || err)
+    );
+    if (order.customer.email) {
+      sendCustomerOrderConfirmation(order).catch((err) =>
+        console.warn('[Notifications] Failed to send customer confirmation:', err?.message || err)
+      );
+    }
 
     // Deduct stock for COD
     if (body.paymentMethod === 'COD') {
