@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#262626" />
+      <stop offset="100%" stop-color="#0e0e0e" />
+    </radialGradient>
+    <!-- Washed Charcoal Fabric Gradient -->
+    <linearGradient id="charcoalTee" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a2a2a" />
+      <stop offset="50%" stop-color="#1f1f1f" />
+      <stop offset="100%" stop-color="#181818" />
+    </linearGradient>
+    <linearGradient id="marvelRed" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dc2626" />
+      <stop offset="100%" stop-color="#ef4444" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="25" stdDeviation="30" flood-color="#000000" flood-opacity="0.8" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="1000" fill="url(#bgGlow)" />
+
+  <!-- T-Shirt Silhouette (Boxy Oversized Streetwear Fit in Washed Charcoal) -->
+  <g filter="url(#shadow)">
+    <path d="M 280,140 
+             C 320,165 480,165 520,140 
+             L 690,240 
+             L 630,390 
+             L 560,340 
+             L 570,860 
+             C 570,875 555,880 540,880 
+             L 260,880 
+             C 245,880 230,875 230,860 
+             L 240,340 
+             L 170,390 
+             L 110,240 
+             Z" 
+          fill="url(#charcoalTee)" stroke="#383838" stroke-width="2" />
+
+    <!-- Ribbed High Crew Neckline -->
+    <path d="M 280,140 C 340,195 460,195 520,140 C 470,175 330,175 280,140 Z" fill="#141414" stroke="#444" stroke-width="1.5" />
+    <path d="M 300,150 C 350,190 450,190 500,150" fill="none" stroke="#2a2a2a" stroke-dasharray="4,3" stroke-width="2" />
+
+    <!-- Dropped Shoulder Seams -->
+    <line x1="280" y1="140" x2="200" y2="300" stroke="#242424" stroke-width="2" stroke-dasharray="6,4" />
+    <line x1="520" y1="140" x2="600" y2="300" stroke="#242424" stroke-width="2" stroke-dasharray="6,4" />
+  </g>
+
+  <!-- Graphic Screen Print: MARVEL Street Comic Edition -->
+  <g transform="translate(400, 470)" text-anchor="middle">
+    <!-- Outer Graphic Panel -->
+    <rect x="-170" y="-180" width="340" height="360" fill="#111111" stroke="#333333" stroke-width="1.5" rx="6" />
+
+    <!-- Marvel Iconic Red Box Logo -->
+    <rect x="-135" y="-140" width="270" height="85" fill="url(#marvelRed)" rx="3" />
+    <text y="-75" fill="#ffffff" font-family="'Impact', 'Arial Black', sans-serif" font-size="64" letter-spacing="1">
+      MARVEL
+    </text>
+
+    <!-- Comic Panel Strip Design -->
+    <g transform="translate(0, -20)">
+      <line x1="-135" y1="0" x2="135" y2="0" stroke="#444" stroke-width="1.5" />
+      
+      <!-- Graphic comic grid typography -->
+      <text y="40" fill="#ffffff" font-family="'Impact', 'Arial Black', sans-serif" font-size="32" letter-spacing="3">
+        HEROIC LEGACY
+      </text>
+
+      <text y="75" fill="#e5e5e5" font-family="sans-serif" font-weight="700" font-size="11" letter-spacing="5">
+        EARTH'S MIGHTIEST HEROES
+      </text>
+
+      <text y="105" fill="#a3a3a3" font-family="'Courier New', monospace" font-size="9" letter-spacing="2">
+        EST. 1939 &bull; NYC // MULTIVERSE ARCHIVE
+      </text>
+    </g>
+
+    <!-- Bottom Barcode & Streetwear Spec -->
+    <g transform="translate(0, 125)">
+      <rect x="-120" y="0" width="240" height="3" fill="#dc2626" />
+      <text y="25" fill="#737373" font-family="'Courier New', monospace" font-size="9" letter-spacing="3">
+        LYVEN APPAREL &bull; 240 GSM HEAVY COTTON
+      </text>
+    </g>
+  </g>
+
+  <!-- Fabric Hem Brand Label -->
+  <rect x="250" y="855" width="45" height="18" fill="#dc2626" rx="2" />
+  <text x="272.5" y="868" fill="#ffffff" font-family="sans-serif" font-size="8" font-weight="bold" text-anchor="middle" letter-spacing="1">LYVEN</text>
+</svg>

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#222222" />
+      <stop offset="100%" stop-color="#0c0c0c" />
+    </radialGradient>
+    <linearGradient id="teeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#181818" />
+      <stop offset="50%" stop-color="#121212" />
+      <stop offset="100%" stop-color="#0a0a0a" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="50%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="25" stdDeviation="30" flood-color="#000000" flood-opacity="0.8" />
+    </filter>
+  </defs>
+
+  <!-- Background Studio Backdrop -->
+  <rect width="800" height="1000" fill="url(#bgGlow)" />
+
+  <!-- T-Shirt Silhouette (Boxy Oversized Streetwear Fit) -->
+  <g filter="url(#shadow)">
+    <!-- Main Body and Sleeves -->
+    <path d="M 280,140 
+             C 320,165 480,165 520,140 
+             L 690,240 
+             L 630,390 
+             L 560,340 
+             L 570,860 
+             C 570,875 555,880 540,880 
+             L 260,880 
+             C 245,880 230,875 230,860 
+             L 240,340 
+             L 170,390 
+             L 110,240 
+             Z" 
+          fill="url(#teeGrad)" stroke="#2b2b2b" stroke-width="2" />
+
+    <!-- Ribbed High Crew Neckline -->
+    <path d="M 280,140 C 340,195 460,195 520,140 C 470,175 330,175 280,140 Z" fill="#0d0d0d" stroke="#333" stroke-width="1.5" />
+    <!-- Neck Seam Detail -->
+    <path d="M 300,150 C 350,190 450,190 500,150" fill="none" stroke="#262626" stroke-dasharray="4,3" stroke-width="2" />
+
+    <!-- Dropped Shoulder Seams -->
+    <line x1="280" y1="140" x2="200" y2="300" stroke="#1f1f1f" stroke-width="2" stroke-dasharray="6,4" />
+    <line x1="520" y1="140" x2="600" y2="300" stroke="#1f1f1f" stroke-width="2" stroke-dasharray="6,4" />
+  </g>
+
+  <!-- Graphic Screen Print Composition: VIRAT KOHLI 18 -->
+  <g transform="translate(400, 470)" text-anchor="middle">
+    <!-- Outer Graphic Frame -->
+    <rect x="-160" y="-190" width="320" height="380" fill="#080808" stroke="#292929" stroke-width="1.5" rx="4" />
+    <rect x="-150" y="-180" width="300" height="360" fill="none" stroke="#e11d48" stroke-width="1" stroke-opacity="0.4" />
+
+    <!-- Small Header Label -->
+    <text y="-155" fill="#a3a3a3" font-family="'Courier New', monospace" font-size="10" letter-spacing="4">
+      LYVEN ARCHIVE // VOL. 01
+    </text>
+
+    <!-- Bold Main Typo -->
+    <text y="-95" fill="#ffffff" font-family="'Impact', 'Arial Black', sans-serif" font-size="44" letter-spacing="2">
+      VIRAT KOHLI
+    </text>
+
+    <!-- Subtitle Banner -->
+    <rect x="-120" y="-80" width="240" height="20" fill="#e11d48" />
+    <text y="-66" fill="#ffffff" font-family="sans-serif" font-weight="900" font-size="10" letter-spacing="3">
+      THE CHASE MASTER
+    </text>
+
+    <!-- Stylized 18 Numeral Artwork -->
+    <text y="75" fill="url(#goldGrad)" font-family="'Impact', 'Arial Black', sans-serif" font-size="140" letter-spacing="-5" font-weight="900">
+      18
+    </text>
+
+    <!-- Graphic Grid Elements -->
+    <circle cx="-100" cy="115" r="4" fill="#e11d48" />
+    <circle cx="100" cy="115" r="4" fill="#e11d48" />
+    <line x1="-80" y1="115" x2="80" y2="115" stroke="#333" stroke-width="1" />
+
+    <text y="145" fill="#ffffff" font-family="sans-serif" font-weight="700" font-size="13" letter-spacing="6">
+      PASSION &bull; FOCUS &bull; GLORY
+    </text>
+
+    <text y="165" fill="#737373" font-family="'Courier New', monospace" font-size="9" letter-spacing="2">
+      HEAVYWEIGHT 240 GSM // DROP SHOULDER
+    </text>
+  </g>
+
+  <!-- Fabric Hem Brand Label -->
+  <rect x="250" y="855" width="45" height="18" fill="#e11d48" rx="2" />
+  <text x="272.5" y="868" fill="#ffffff" font-family="sans-serif" font-size="8" font-weight="bold" text-anchor="middle" letter-spacing="1">LYVEN</text>
+</svg>

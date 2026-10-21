@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#262626" />
+      <stop offset="100%" stop-color="#0e0e0e" />
+    </radialGradient>
+    <linearGradient id="charcoalTee" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a2a2a" />
+      <stop offset="50%" stop-color="#1f1f1f" />
+      <stop offset="100%" stop-color="#181818" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="25" stdDeviation="30" flood-color="#000000" flood-opacity="0.8" />
+    </filter>
+  </defs>
+
+  <rect width="800" height="1000" fill="url(#bgGlow)" />
+
+  <g filter="url(#shadow)">
+    <path d="M 280,140 
+             C 320,150 480,150 520,140 
+             L 690,240 
+             L 630,390 
+             L 560,340 
+             L 570,860 
+             C 570,875 555,880 540,880 
+             L 260,880 
+             C 245,880 230,875 230,860 
+             L 240,340 
+             L 170,390 
+             L 110,240 
+             Z" 
+          fill="url(#charcoalTee)" stroke="#383838" stroke-width="2" />
+
+    <!-- Back Neckline -->
+    <path d="M 280,140 C 350,155 450,155 520,140" fill="none" stroke="#444" stroke-width="2" />
+    <rect x="375" y="160" width="50" height="25" fill="#141414" stroke="#444" stroke-width="1" rx="2" />
+    <text x="400" y="176" fill="#888" font-family="'Courier New', monospace" font-size="8" text-anchor="middle">LYVEN S</text>
+
+    <!-- Dropped Shoulder Seams -->
+    <line x1="280" y1="140" x2="200" y2="300" stroke="#242424" stroke-width="2" stroke-dasharray="6,4" />
+    <line x1="520" y1="140" x2="600" y2="300" stroke="#242424" stroke-width="2" stroke-dasharray="6,4" />
+  </g>
+
+  <!-- Large Back Graphic -->
+  <g transform="translate(400, 480)" text-anchor="middle">
+    <!-- Stylized Monogram Graphic -->
+    <circle cx="0" cy="-60" r="85" fill="none" stroke="#dc2626" stroke-width="3" />
+    <circle cx="0" cy="-60" r="75" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="6,4" />
+    <!-- Letter 'A' Hero Insignia -->
+    <path d="M -30,0 L 0,-115 L 30,0 L 15,0 L 8,-35 L -8,-35 L -15,0 Z M -4,-55 L 4,-55 L 0,-85 Z" fill="#ffffff" />
+
+    <text y="70" fill="#ffffff" font-family="'Impact', 'Arial Black', sans-serif" font-size="44" letter-spacing="6">
+      AVENGERS ASSEMBLE
+    </text>
+
+    <text y="110" fill="#a3a3a3" font-family="sans-serif" font-weight="bold" font-size="12" letter-spacing="8">
+      THE INFINITY SAGA ARCHIVE
+    </text>
+
+    <line x1="-120" y1="140" x2="120" y2="140" stroke="#444" stroke-width="1.5" />
+    <text y="165" fill="#666" font-family="'Courier New', monospace" font-size="10" letter-spacing="3">
+      AUTHENTIC LICENSED TRIBUTE // LYVEN INDIA
+    </text>
+  </g>
+</svg>
