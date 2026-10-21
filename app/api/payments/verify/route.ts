@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const secret = process.env.RAZORPAY_KEY_SECRET;
+    const secret = process.env.RAZORPAY_KEY_SECRET?.trim();
     if (!secret || secret.includes('demoSecret')) {
       return NextResponse.json(
         { success: false, error: 'Server payment gateway secret not configured' },

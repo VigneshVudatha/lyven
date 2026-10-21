@@ -112,17 +112,15 @@ export async function POST(req: NextRequest) {
 
     // Create Razorpay order for online payment
     if (body.paymentMethod === 'ONLINE') {
-      const rzpKeyId = process.env.RAZORPAY_KEY_ID;
-      const rzpKeySecret = process.env.RAZORPAY_KEY_SECRET;
+      const rzpKeyId = (process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID)?.trim();
+      const rzpKeySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
 
-      const isConfigured = Boolean(
-        rzpKeyId &&
-        rzpKeySecret &&
-        !rzpKeyId.includes('demoKey') &&
-        !rzpKeySecret.includes('demoSecret')
-      );
-
-      if (!isConfigured) {
+      if (
+        !rzpKeyId ||
+        !rzpKeySecret ||
+        rzpKeyId.includes('demoKey') ||
+        rzpKeySecret.includes('demoSecret')
+      ) {
         return NextResponse.json(
           {
             success: false,
@@ -130,6 +128,26 @@ export async function POST(req: NextRequest) {
               'Online payment gateway is not yet configured. Please select Cash on Delivery (COD) to place your order, or contact us on WhatsApp.',
           },
           { status: 503 }
+        );
+      }
+
+      // Check mode format: must start with rzp_test_ or rzp_live_
+      const isTestKey = rzpKeyId.startsWith('rzp_test_');
+      const isLiveKey = rzpKeyId.startsWith('rzp_live_');
+      if (!isTestKey && !isLiveKey) {
+        console.error('[Razorpay Config Error] Invalid key_id format. Must start with rzp_test_ or rzp_live_');
+        return NextResponse.json(
+          { success: false, error: 'Payment gateway configuration error. Please choose Cash on Delivery (COD).' },
+          { status: 503 }
+        );
+      }
+
+      // Ensure amount is integer in paise and at least 100 paise (₹1)
+      const orderAmountPaise = Math.round(Number(totalPaise));
+      if (isNaN(orderAmountPaise) || orderAmountPaise < 100) {
+        return NextResponse.json(
+          { success: false, error: 'Order total must be at least ₹1 (100 paise)' },
+          { status: 400 }
         );
       }
 
@@ -141,18 +159,39 @@ export async function POST(req: NextRequest) {
         });
 
         const rzpOrder = await rzp.orders.create({
-          amount: totalPaise,
+          amount: orderAmountPaise,
           currency: 'INR',
-          receipt: orderRef,
+          receipt: orderRef.slice(0, 40),
+          notes: {
+            orderRef,
+          },
         });
 
         razorpayOrderId = rzpOrder.id;
       } catch (err: any) {
-        console.error('Razorpay order creation failed:', err.message);
+        const upstreamStatus = err?.statusCode || (err?.error?.code ? 400 : 500);
+        const errorCode = err?.error?.code || 'RAZORPAY_ERROR';
+        const errorDesc = err?.error?.description || err?.message || 'Upstream provider rejected order creation';
+
+        console.error('[Razorpay Order Creation Failed]', {
+          upstreamStatus,
+          errorCode,
+          errorDesc,
+          keyMode: isLiveKey ? 'live' : 'test',
+          orderRef,
+          amountPaise: orderAmountPaise,
+        });
+
+        const isAuthError = upstreamStatus === 401 || String(errorDesc).toLowerCase().includes('auth');
+        const userFacingMessage = isAuthError
+          ? 'Payment gateway authorization failed. Please contact support or select Cash on Delivery (COD).'
+          : 'Razorpay service temporarily unavailable. Please select Cash on Delivery (COD) or try again later.';
+
         return NextResponse.json(
           {
             success: false,
-            error: 'Razorpay service unavailable. Please select Cash on Delivery (COD) or try again later.',
+            error: userFacingMessage,
+            code: errorCode,
           },
           { status: 503 }
         );
@@ -251,7 +290,7 @@ export async function POST(req: NextRequest) {
         totalPaise,
         paymentMethod: body.paymentMethod,
         razorpayOrderId,
-        razorpayKeyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        razorpayKeyId: (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID)?.trim(),
       },
     });
   } catch (err: any) {

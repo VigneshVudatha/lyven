@@ -171,4 +171,67 @@ describe('Razorpay Standard Web Checkout Integration', () => {
     assert.strictEqual(onlineOrder.paymentMethod, 'ONLINE');
     assert.strictEqual(onlineOrder.requiresRazorpay, true);
   });
+
+  // 5. Regression Tests for Razorpay Order Creation & Error Extraction
+  test('safely extracts error description and code without logging undefined', () => {
+    // Simulate Razorpay SDK error structure
+    const razorpaySdk401Error = {
+      statusCode: 401,
+      error: {
+        code: 'BAD_REQUEST_ERROR',
+        description: 'Authentication failed',
+      },
+    };
+
+    function parseRazorpayError(err) {
+      const upstreamStatus = err?.statusCode || (err?.error?.code ? 400 : 500);
+      const errorCode = err?.error?.code || 'RAZORPAY_ERROR';
+      const errorDesc = err?.error?.description || err?.message || 'Upstream provider rejected order creation';
+      return { upstreamStatus, errorCode, errorDesc };
+    }
+
+    const parsed = parseRazorpayError(razorpaySdk401Error);
+    assert.strictEqual(parsed.upstreamStatus, 401);
+    assert.strictEqual(parsed.errorCode, 'BAD_REQUEST_ERROR');
+    assert.strictEqual(parsed.errorDesc, 'Authentication failed');
+    assert.notStrictEqual(parsed.errorDesc, 'undefined');
+  });
+
+  test('trims whitespace and invisible newlines from environment credentials', () => {
+    const rawKeyId = '  rzp_test_TqYOVmJTE0eGNq \n';
+    const rawSecret = ' 9ZoSgTf72fuxvfytLFuGj6oG\r\n';
+
+    const cleanedKeyId = rawKeyId.trim();
+    const cleanedSecret = rawSecret.trim();
+
+    assert.strictEqual(cleanedKeyId, 'rzp_test_TqYOVmJTE0eGNq');
+    assert.strictEqual(cleanedSecret, '9ZoSgTf72fuxvfytLFuGj6oG');
+    assert.strictEqual(cleanedKeyId.includes(' '), false);
+    assert.strictEqual(cleanedSecret.includes('\n'), false);
+  });
+
+  test('validates key format starts with rzp_test_ or rzp_live_', () => {
+    function isValidKeyFormat(key) {
+      if (!key) return false;
+      const trimmed = key.trim();
+      return trimmed.startsWith('rzp_test_') || trimmed.startsWith('rzp_live_');
+    }
+
+    assert.strictEqual(isValidKeyFormat('rzp_test_TqYOVmJTE0eGNq'), true);
+    assert.strictEqual(isValidKeyFormat('rzp_live_abcdef12345678'), true);
+    assert.strictEqual(isValidKeyFormat('invalid_prefix_123'), false);
+    assert.strictEqual(isValidKeyFormat(''), false);
+  });
+
+  test('ensures order amount is rounded to an integer paise', () => {
+    function sanitizePaise(amount) {
+      const rounded = Math.round(Number(amount));
+      return Number.isInteger(rounded) && rounded >= 100 ? rounded : null;
+    }
+
+    assert.strictEqual(sanitizePaise(40000), 40000);
+    assert.strictEqual(sanitizePaise(40000.4), 40000);
+    assert.strictEqual(sanitizePaise(40000.7), 40001);
+    assert.strictEqual(sanitizePaise(50), null); // below min 100 paise
+  });
 });
