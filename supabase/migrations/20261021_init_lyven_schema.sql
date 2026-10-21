@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_product_images_product_id ON public.product_image
 CREATE TABLE IF NOT EXISTS public.product_variants (
     id TEXT PRIMARY KEY DEFAULT ('var_' || substr(gen_random_uuid()::text, 1, 12)),
     product_id TEXT NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
-    size TEXT NOT NULL CHECK (size IN ('S', 'M', 'L', 'XL', 'XXL', 'CUSTOM')),
+    size TEXT NOT NULL CHECK (size IN ('XS', 'S', 'M', 'L', 'XL', 'XXL', '2XL', 'CUSTOM')),
     color TEXT NOT NULL DEFAULT 'Jet Black',
     sku TEXT UNIQUE NOT NULL,
     quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
@@ -328,27 +328,47 @@ ALTER TABLE public.order_status_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.custom_design_enquiries ENABLE ROW LEVEL SECURITY;
 
 -- Public can READ published products, images, and active variants
+DROP POLICY IF EXISTS "Public read published products" ON public.products;
 CREATE POLICY "Public read published products"
     ON public.products FOR SELECT
     USING (is_published = true);
 
+DROP POLICY IF EXISTS "Public read product images" ON public.product_images;
 CREATE POLICY "Public read product images"
     ON public.product_images FOR SELECT
     USING (true);
 
+DROP POLICY IF EXISTS "Public read active variants" ON public.product_variants;
 CREATE POLICY "Public read active variants"
     ON public.product_variants FOR SELECT
     USING (is_active = true);
 
 -- Service role has full access to all tables (for secure server-side route handlers)
+DROP POLICY IF EXISTS "Service role full access products" ON public.products;
 CREATE POLICY "Service role full access products" ON public.products FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access product_images" ON public.product_images;
 CREATE POLICY "Service role full access product_images" ON public.product_images FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access product_variants" ON public.product_variants;
 CREATE POLICY "Service role full access product_variants" ON public.product_variants FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access inventory_movements" ON public.inventory_movements;
 CREATE POLICY "Service role full access inventory_movements" ON public.inventory_movements FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access orders" ON public.orders;
 CREATE POLICY "Service role full access orders" ON public.orders FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access order_items" ON public.order_items;
 CREATE POLICY "Service role full access order_items" ON public.order_items FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access payments" ON public.payments;
 CREATE POLICY "Service role full access payments" ON public.payments FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access order_status_history" ON public.order_status_history;
 CREATE POLICY "Service role full access order_status_history" ON public.order_status_history FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Service role full access custom_design_enquiries" ON public.custom_design_enquiries;
 CREATE POLICY "Service role full access custom_design_enquiries" ON public.custom_design_enquiries FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- ====================================================================
@@ -363,11 +383,13 @@ VALUES ('custom-designs', 'custom-designs', true)
 ON CONFLICT (id) DO UPDATE SET public = true;
 
 -- Storage policies: Public read for products
+DROP POLICY IF EXISTS "Public read product assets" ON storage.objects;
 CREATE POLICY "Public read product assets"
     ON storage.objects FOR SELECT
     USING (bucket_id IN ('lyven-products', 'custom-designs'));
 
 -- Service role full access to storage
+DROP POLICY IF EXISTS "Service role manage storage" ON storage.objects;
 CREATE POLICY "Service role manage storage"
     ON storage.objects FOR ALL TO service_role
     USING (true) WITH CHECK (true);
