@@ -54,7 +54,7 @@ export default function HeaderSearch() {
   };
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-xs md:max-w-md lg:max-w-lg">
+    <div ref={containerRef} className="relative w-full max-w-full sm:max-w-md lg:max-w-lg">
       <form onSubmit={handleSubmit} className="relative flex items-center">
         <Search className="absolute left-3.5 w-4 h-4 text-gray-400 pointer-events-none" />
         <input
