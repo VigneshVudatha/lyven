@@ -39,6 +39,7 @@ async function sendViaResend(params: SendEmailParams): Promise<{ success: boolea
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      signal: AbortSignal.timeout(5000),
       body: JSON.stringify({
         from: fromEmail,
         to: recipients,
@@ -51,14 +52,25 @@ async function sendViaResend(params: SendEmailParams): Promise<{ success: boolea
     const data = await res.json();
 
     if (!res.ok) {
-      console.warn('[Email Notifications] Resend API error response:', data);
+      if (data?.name === 'validation_error' && String(data?.message).includes('testing emails to your own email address')) {
+        console.warn(
+          `[Email Notifications] Resend sandbox restriction: ${data.message}. ` +
+          `To deliver to customer recipients (${recipients.join(', ')}), a custom domain must be verified at resend.com/domains.`
+        );
+      } else {
+        console.warn('[Email Notifications] Resend API error response:', data);
+      }
       return { success: false, error: data.message || 'Resend API error' };
     }
 
     return { success: true, id: data.id };
   } catch (err: any) {
-    console.error('[Email Notifications] Network error sending email via Resend:', err.message);
-    return { success: false, error: err.message };
+    const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+    console.error(
+      `[Email Notifications] ${isTimeout ? 'Timeout (5s)' : 'Network error'} sending email via Resend:`,
+      err.message || err
+    );
+    return { success: false, error: isTimeout ? 'EMAIL_GATEWAY_TIMEOUT' : err.message };
   }
 }
 
@@ -269,4 +281,304 @@ export async function sendCustomerOrderConfirmation(order: Order) {
     html,
     text: `Thank you for your LYVEN order ${order.orderRef}. Total: ${totalInRupees}. Delivering to ${order.customer.fullName}, ${order.customer.city}.`,
   });
+}
+
+/**
+ * 3. Payment Success Notification
+ * Dispatched when Razorpay payment is verified or captured via webhook
+ */
+export async function sendPaymentSuccessNotification(order: Order, razorpayPaymentId: string) {
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'lyven.support1@gmail.com';
+  const totalInRupees = formatINR(order.totalPaise);
+  const adminSubject = `💰 [PAYMENT RECEIVED] ${order.orderRef} — ${totalInRupees} (ID: ${razorpayPaymentId})`;
+
+  const itemsHtml = order.items
+    .map(
+      (item) => `
+      <tr style="border-bottom: 1px solid #222;">
+        <td style="padding: 10px 0; color: #FAF8F3;">
+          <strong style="color: #FAF8F3;">${item.name}</strong><br/>
+          <span style="font-size: 12px; color: #C9A45C; font-family: monospace;">Size: ${item.size} | Color: ${item.color} | Qty: ${item.quantity}</span>
+        </td>
+        <td style="padding: 10px 0; text-align: right; color: #FAF8F3; font-family: monospace; font-weight: bold;">
+          ${formatINR(item.totalPricePaise)}
+        </td>
+      </tr>
+    `
+    )
+    .join('');
+
+  const adminHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head><meta charset="utf-8"><title>${adminSubject}</title></head>
+      <body style="background-color: #0B0B0D; color: #FAF8F3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; margin: 0;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #121216; border: 1px solid #26262b; border-radius: 12px; overflow: hidden;">
+          <div style="padding: 24px; background: linear-gradient(180deg, #18181e 0%, #121216 100%); border-bottom: 1px solid #26262b;">
+            <div style="font-size: 11px; font-family: monospace; letter-spacing: 0.2em; color: #34C759; text-transform: uppercase;">PAYMENT CAPTURED · LYVEN INTERNAL</div>
+            <h1 style="margin: 6px 0 0; font-size: 20px; font-weight: 800; color: #FAF8F3;">Online Payment Received</h1>
+          </div>
+          <div style="padding: 24px;">
+            <div style="background-color: #0B0B0D; border: 1px solid #26262b; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+              <table style="width: 100%; font-size: 13px;">
+                <tr><td style="color: #8E8E93; padding-bottom: 6px;">Order Reference:</td><td style="color: #FAF8F3; font-family: monospace; font-weight: bold; text-align: right;">${order.orderRef}</td></tr>
+                <tr><td style="color: #8E8E93; padding-bottom: 6px;">Razorpay Payment ID:</td><td style="color: #34C759; font-family: monospace; font-weight: bold; text-align: right;">${razorpayPaymentId}</td></tr>
+                <tr><td style="color: #8E8E93; padding-bottom: 6px;">Customer:</td><td style="color: #FAF8F3; text-align: right;">${order.customer.fullName} (+91 ${order.customer.mobile})</td></tr>
+                <tr><td style="color: #8E8E93;">Amount Paid:</td><td style="color: #34C759; font-size: 16px; font-weight: 800; font-family: monospace; text-align: right;">${totalInRupees}</td></tr>
+              </table>
+            </div>
+            <h3 style="font-size: 14px; text-transform: uppercase; font-family: monospace; letter-spacing: 0.1em; color: #C9A45C; margin: 0 0 10px;">Items</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">${itemsHtml}</table>
+            <div style="text-align: center; padding-top: 10px;">
+              <a href="https://lyven.in/admin/orders" style="display: inline-block; background-color: #C9A45C; color: #0B0B0D; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; padding: 12px 24px; border-radius: 8px; text-decoration: none;">View in Admin Orders</a>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const adminPromise = sendViaResend({
+    to: adminEmail,
+    subject: adminSubject,
+    html: adminHtml,
+    text: `Payment of ${totalInRupees} received for order ${order.orderRef} (Razorpay ID: ${razorpayPaymentId}). Customer: ${order.customer.fullName}.`,
+  });
+
+  let customerPromise = Promise.resolve<{ success: boolean; reason?: string }>({
+    success: false,
+    reason: 'NO_CUSTOMER_EMAIL_PROVIDED',
+  });
+
+  if (order.customer.email) {
+    const customerSubject = `Payment Confirmed — Your LYVEN Order ${order.orderRef} is in Production`;
+    const customerHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><title>${customerSubject}</title></head>
+        <body style="background-color: #FAF8F3; color: #0B0B0D; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; margin: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E7E5DD; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
+            <div style="padding: 32px 24px 24px; text-align: center; background-color: #0B0B0D; color: #FAF8F3;">
+              <div style="font-size: 24px; font-weight: 900; letter-spacing: 0.15em; color: #FAF8F3;">LYVEN</div>
+              <div style="font-size: 10px; font-family: monospace; letter-spacing: 0.25em; color: #C9A45C; margin-top: 4px;">WEAR YOUR STORY</div>
+            </div>
+            <div style="padding: 32px 24px;">
+              <div style="display: inline-block; padding: 4px 12px; border-radius: 9999px; background-color: #E8F8EE; color: #1E7E34; font-size: 12px; font-weight: bold; margin-bottom: 12px;">Payment Verified ✓</div>
+              <h1 style="font-size: 20px; font-weight: 800; color: #0B0B0D; margin: 0 0 8px;">Payment Received!</h1>
+              <p style="font-size: 14px; color: #555; line-height: 1.6; margin: 0 0 24px;">
+                Hi <strong>${order.customer.fullName}</strong>, your payment of <strong>${totalInRupees}</strong> has been successfully received. Your order is confirmed and our studio is tailoring your heavyweight pieces.
+              </p>
+              <div style="background-color: #F8F7F3; border: 1px solid #EAE7DF; border-radius: 12px; padding: 18px; margin-bottom: 24px; font-size: 13px;">
+                <table style="width: 100%;">
+                  <tr><td style="color: #6B6E7B; padding-bottom: 8px;">Order Reference:</td><td style="color: #0B0B0D; font-weight: bold; font-family: monospace; text-align: right;">${order.orderRef}</td></tr>
+                  <tr><td style="color: #6B6E7B; padding-bottom: 8px;">Payment Transaction ID:</td><td style="color: #0B0B0D; font-weight: bold; font-family: monospace; text-align: right;">${razorpayPaymentId}</td></tr>
+                  <tr><td style="color: #6B6E7B;">Amount Paid:</td><td style="color: #0B0B0D; font-size: 16px; font-weight: 800; font-family: monospace; text-align: right;">${totalInRupees}</td></tr>
+                </table>
+              </div>
+              <h2 style="font-size: 14px; text-transform: uppercase; font-family: monospace; letter-spacing: 0.1em; color: #8E8E93; margin: 0 0 12px;">Items Summary</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">${itemsHtml}</table>
+              <div style="text-align: center; padding: 20px 0; border-top: 1px solid #EAE7DF;">
+                <a href="https://wa.me/916300107759?text=Hi%20LYVEN!%20I%20have%20a%20question%20about%20order%20${order.orderRef}" style="display: inline-block; background-color: #25D366; color: #FFFFFF; font-weight: 700; font-size: 12px; padding: 12px 24px; border-radius: 10px; text-decoration: none;">Chat with Studio on WhatsApp</a>
+              </div>
+            </div>
+            <div style="background-color: #F4F3ED; padding: 20px 24px; text-align: center; font-size: 11px; color: #8E8E93; border-top: 1px solid #E7E5DD;">
+              © 2026 LYVEN. Premium streetwear designed and crafted in India.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+    customerPromise = sendViaResend({
+      to: order.customer.email,
+      subject: customerSubject,
+      html: customerHtml,
+      text: `Payment of ${totalInRupees} verified for order ${order.orderRef} (Payment ID: ${razorpayPaymentId}). Thank you for shopping with LYVEN.`,
+    });
+  }
+
+  const [adminResult, customerResult] = await Promise.allSettled([adminPromise, customerPromise]);
+  const adminOk = adminResult.status === 'fulfilled' && adminResult.value.success === true;
+  const customerOk = customerResult.status === 'fulfilled' && customerResult.value.success === true;
+  return {
+    success: adminOk || customerOk,
+    adminResult: adminResult.status === 'fulfilled' ? adminResult.value : null,
+    customerResult: customerResult.status === 'fulfilled' ? customerResult.value : null,
+  };
+}
+
+/**
+ * 4. Order Status Update Notification
+ * Dispatched when order fulfilmentStatus transitions (e.g. PROCESSING, SHIPPED, DELIVERED)
+ */
+export async function sendOrderStatusUpdateNotification(
+  order: Order,
+  previousStatus: string,
+  newStatus: string
+) {
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'lyven.support1@gmail.com';
+  const adminSubject = `📦 [STATUS UPDATE] ${order.orderRef} ➔ ${newStatus}`;
+
+  const trackingInfoHtml =
+    order.trackingId || order.courierName
+      ? `<div style="background-color: #0B0B0D; border: 1px solid #26262b; border-radius: 8px; padding: 16px; margin: 16px 0; font-size: 13px;">
+          ${order.courierName ? `<strong>Courier:</strong> ${order.courierName}<br/>` : ''}
+          ${order.trackingId ? `<strong>Tracking ID:</strong> <span style="font-family: monospace; color: #C9A45C;">${order.trackingId}</span><br/>` : ''}
+          ${order.trackingUrl ? `<a href="${order.trackingUrl}" style="color: #34C759; text-decoration: underline;">Track Shipment Online</a>` : ''}
+        </div>`
+      : '';
+
+  const adminPromise = sendViaResend({
+    to: adminEmail,
+    subject: adminSubject,
+    html: `
+      <div style="font-family: sans-serif; background-color: #0B0B0D; color: #FAF8F3; padding: 24px;">
+        <h2>Order Status Changed to ${newStatus}</h2>
+        <p>Order <strong>${order.orderRef}</strong> changed from ${previousStatus} to <strong>${newStatus}</strong>.</p>
+        <p>Customer: ${order.customer.fullName} (+91 ${order.customer.mobile})</p>
+        ${trackingInfoHtml}
+      </div>
+    `,
+    text: `Order ${order.orderRef} status updated from ${previousStatus} to ${newStatus}.`,
+  });
+
+  let customerPromise = Promise.resolve<{ success: boolean; reason?: string }>({
+    success: false,
+    reason: 'NO_CUSTOMER_EMAIL_PROVIDED',
+  });
+
+  if (order.customer.email) {
+    const customerSubject = `Shipment Update: Your LYVEN Order ${order.orderRef} is ${newStatus}`;
+    const customerHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><title>${customerSubject}</title></head>
+        <body style="background-color: #FAF8F3; color: #0B0B0D; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; margin: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E7E5DD; border-radius: 16px; overflow: hidden;">
+            <div style="padding: 32px 24px 24px; text-align: center; background-color: #0B0B0D; color: #FAF8F3;">
+              <div style="font-size: 24px; font-weight: 900; letter-spacing: 0.15em; color: #FAF8F3;">LYVEN</div>
+              <div style="font-size: 10px; font-family: monospace; letter-spacing: 0.25em; color: #C9A45C; margin-top: 4px;">WEAR YOUR STORY</div>
+            </div>
+            <div style="padding: 32px 24px;">
+              <h1 style="font-size: 20px; font-weight: 800; color: #0B0B0D; margin: 0 0 8px;">Order Status: ${newStatus}</h1>
+              <p style="font-size: 14px; color: #555; line-height: 1.6; margin: 0 0 20px;">
+                Hi <strong>${order.customer.fullName}</strong>, your order <strong>${order.orderRef}</strong> is now marked as <strong>${newStatus}</strong>.
+              </p>
+              ${order.trackingId || order.courierName ? `
+                <div style="background-color: #F8F7F3; border: 1px solid #EAE7DF; border-radius: 12px; padding: 18px; margin-bottom: 24px; font-size: 13px; line-height: 1.6;">
+                  ${order.courierName ? `<strong>Courier Partner:</strong> ${order.courierName}<br/>` : ''}
+                  ${order.trackingId ? `<strong>Tracking AWB:</strong> <span style="font-family: monospace; font-weight: bold;">${order.trackingId}</span><br/>` : ''}
+                  ${order.trackingUrl ? `<div style="margin-top: 8px;"><a href="${order.trackingUrl}" style="display: inline-block; background-color: #0B0B0D; color: #FAF8F3; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold;">Track Package</a></div>` : ''}
+                </div>
+              ` : ''}
+              <div style="text-align: center; padding: 20px 0; border-top: 1px solid #EAE7DF;">
+                <p style="font-size: 12px; color: #6B6E7B; margin-bottom: 12px;">Questions about your delivery?</p>
+                <a href="https://wa.me/916300107759?text=Hi%20LYVEN!%20Tracking%20update%20for%20order%20${order.orderRef}" style="display: inline-block; background-color: #25D366; color: #FFFFFF; font-weight: 700; font-size: 12px; padding: 12px 24px; border-radius: 10px; text-decoration: none;">Chat with Support on WhatsApp</a>
+              </div>
+            </div>
+            <div style="background-color: #F4F3ED; padding: 20px 24px; text-align: center; font-size: 11px; color: #8E8E93; border-top: 1px solid #E7E5DD;">
+              © 2026 LYVEN. Premium streetwear designed and crafted in India.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+    customerPromise = sendViaResend({
+      to: order.customer.email,
+      subject: customerSubject,
+      html: customerHtml,
+      text: `Your LYVEN order ${order.orderRef} is now ${newStatus}. ${order.trackingId ? `Tracking: ${order.trackingId}` : ''}`,
+    });
+  }
+
+  const [adminResult, customerResult] = await Promise.allSettled([adminPromise, customerPromise]);
+  const adminOk = adminResult.status === 'fulfilled' && adminResult.value.success === true;
+  const customerOk = customerResult.status === 'fulfilled' && customerResult.value.success === true;
+  return {
+    success: adminOk || customerOk,
+    adminResult: adminResult.status === 'fulfilled' ? adminResult.value : null,
+    customerResult: customerResult.status === 'fulfilled' ? customerResult.value : null,
+  };
+}
+
+/**
+ * 5. Order Cancellation Notification
+ * Dispatched when an order is cancelled
+ */
+export async function sendOrderCancellationNotification(order: Order, reason?: string) {
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'lyven.support1@gmail.com';
+  const totalInRupees = formatINR(order.totalPaise);
+  const adminSubject = `⚠️ [ORDER CANCELLED] ${order.orderRef} — ${totalInRupees}`;
+
+  const adminPromise = sendViaResend({
+    to: adminEmail,
+    subject: adminSubject,
+    html: `
+      <div style="font-family: sans-serif; background-color: #0B0B0D; color: #FAF8F3; padding: 24px;">
+        <h2 style="color: #FF3B30;">Order Cancelled: ${order.orderRef}</h2>
+        <p>Customer: ${order.customer.fullName} (+91 ${order.customer.mobile})</p>
+        <p>Amount: ${totalInRupees} (${order.paymentMethod} - ${order.paymentStatus})</p>
+        ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
+      </div>
+    `,
+    text: `Order ${order.orderRef} cancelled. Reason: ${reason || 'Not specified'}. Total: ${totalInRupees}`,
+  });
+
+  let customerPromise = Promise.resolve<{ success: boolean; reason?: string }>({
+    success: false,
+    reason: 'NO_CUSTOMER_EMAIL_PROVIDED',
+  });
+
+  if (order.customer.email) {
+    const customerSubject = `Order Cancellation Notice — ${order.orderRef}`;
+    const isPrepaid = order.paymentMethod === 'ONLINE' && order.paymentStatus === 'PAID';
+    const customerHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head><meta charset="utf-8"><title>${customerSubject}</title></head>
+        <body style="background-color: #FAF8F3; color: #0B0B0D; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; margin: 0;">
+          <div style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E7E5DD; border-radius: 16px; overflow: hidden;">
+            <div style="padding: 32px 24px 24px; text-align: center; background-color: #0B0B0D; color: #FAF8F3;">
+              <div style="font-size: 24px; font-weight: 900; letter-spacing: 0.15em; color: #FAF8F3;">LYVEN</div>
+              <div style="font-size: 10px; font-family: monospace; letter-spacing: 0.25em; color: #C9A45C; margin-top: 4px;">WEAR YOUR STORY</div>
+            </div>
+            <div style="padding: 32px 24px;">
+              <h1 style="font-size: 20px; font-weight: 800; color: #0B0B0D; margin: 0 0 8px;">Order Cancelled</h1>
+              <p style="font-size: 14px; color: #555; line-height: 1.6; margin: 0 0 20px;">
+                Hi <strong>${order.customer.fullName}</strong>, your order <strong>${order.orderRef}</strong> has been cancelled.
+                ${reason ? `<br/><br/><strong>Reason:</strong> ${reason}` : ''}
+              </p>
+              ${isPrepaid ? `
+                <div style="background-color: #F8F7F3; border: 1px solid #EAE7DF; border-radius: 12px; padding: 18px; margin-bottom: 24px; font-size: 13px; line-height: 1.6;">
+                  <strong style="color: #34C759;">Refund Information:</strong><br/>
+                  Since your order was paid online (${totalInRupees}), a full refund will be processed back to your original payment method via Razorpay within 5 to 7 business days.
+                </div>
+              ` : ''}
+              <div style="text-align: center; padding: 20px 0; border-top: 1px solid #EAE7DF;">
+                <p style="font-size: 12px; color: #6B6E7B; margin-bottom: 12px;">Need assistance or want to re-order?</p>
+                <a href="https://wa.me/916300107759?text=Hi%20LYVEN!%20Question%20about%20cancelled%20order%20${order.orderRef}" style="display: inline-block; background-color: #25D366; color: #FFFFFF; font-weight: 700; font-size: 12px; padding: 12px 24px; border-radius: 10px; text-decoration: none;">Chat with Studio on WhatsApp</a>
+              </div>
+            </div>
+            <div style="background-color: #F4F3ED; padding: 20px 24px; text-align: center; font-size: 11px; color: #8E8E93; border-top: 1px solid #E7E5DD;">
+              © 2026 LYVEN. Premium streetwear designed and crafted in India.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+    customerPromise = sendViaResend({
+      to: order.customer.email,
+      subject: customerSubject,
+      html: customerHtml,
+      text: `Your LYVEN order ${order.orderRef} has been cancelled. ${isPrepaid ? 'Refund will be processed in 5-7 business days.' : ''}`,
+    });
+  }
+
+  const [adminResult, customerResult] = await Promise.allSettled([adminPromise, customerPromise]);
+  const adminOk = adminResult.status === 'fulfilled' && adminResult.value.success === true;
+  const customerOk = customerResult.status === 'fulfilled' && customerResult.value.success === true;
+  return {
+    success: adminOk || customerOk,
+    adminResult: adminResult.status === 'fulfilled' ? adminResult.value : null,
+    customerResult: customerResult.status === 'fulfilled' ? customerResult.value : null,
+  };
 }

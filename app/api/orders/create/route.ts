@@ -294,14 +294,14 @@ export async function POST(req: NextRequest) {
     // Store order in Supabase
     await saveOrder(order);
 
-    // Asynchronously dispatch transactional notifications (non-blocking)
-    sendAdminOrderNotification(order).catch((err) =>
-      console.warn('[Notifications] Failed to send admin alert:', err?.message || err)
-    );
-    if (order.customer.email) {
-      sendCustomerOrderConfirmation(order).catch((err) =>
-        console.warn('[Notifications] Failed to send customer confirmation:', err?.message || err)
-      );
+    // Safely dispatch transactional notifications before returning response (awaiting so Serverless does not abort)
+    try {
+      await Promise.allSettled([
+        sendAdminOrderNotification(order),
+        order.customer.email ? sendCustomerOrderConfirmation(order) : Promise.resolve(),
+      ]);
+    } catch (notifErr: any) {
+      console.warn('[Notifications] Order creation notification dispatch warning:', notifErr?.message || notifErr);
     }
 
     // Deduct stock for COD

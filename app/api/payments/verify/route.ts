@@ -7,7 +7,9 @@ import {
   deductVariantStock,
   getPaymentByOrderId,
   updatePayment,
+  transitionOrderToPaid,
 } from '@/lib/db/repository';
+import { sendPaymentSuccessNotification } from '@/lib/email/notifications';
 
 export async function POST(req: NextRequest) {
   try {
@@ -78,26 +80,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Mark order as PAID
-    await updateOrder(order.id, {
-      paymentStatus: 'PAID',
-      razorpayPaymentId,
-    });
+    // Concurrency-safe atomic claim of the transition to PAID
+    const claim = await transitionOrderToPaid(order.id, razorpayPaymentId);
 
-    // Concurrency-safe atomic stock deduction for paid order
-    for (const item of order.items) {
+    if (!claim.success) {
+      if (claim.alreadyPaid) {
+        return NextResponse.json({
+          success: true,
+          message: 'Order was already verified and marked as paid',
+          data: { orderRef: order.orderRef, status: 'already_paid' },
+        });
+      }
+      return NextResponse.json(
+        { success: false, error: 'Failed to record payment confirmation' },
+        { status: 500 }
+      );
+    }
+
+    const paidOrder = claim.order!;
+
+    // Concurrency-safe atomic stock deduction: ONLY executed by the winning claim
+    for (const item of paidOrder.items) {
       await deductVariantStock(item.variantId, item.quantity);
     }
 
     // Update internal payment audit record
-    const paymentRecord = await getPaymentByOrderId(order.id);
+    const paymentRecord = await getPaymentByOrderId(paidOrder.id);
     if (paymentRecord) {
-      await updatePayment(order.id, {
+      await updatePayment(paidOrder.id, {
         razorpayPaymentId,
         razorpaySignature,
         verified: true,
         status: 'PAID',
       });
+    }
+
+    // Safely dispatch payment success notifications: ONLY executed by the winning claim
+    try {
+      await sendPaymentSuccessNotification(paidOrder, razorpayPaymentId);
+    } catch (notifErr: any) {
+      console.warn('[Notifications] Payment verification notification warning:', notifErr?.message || notifErr);
     }
 
     return NextResponse.json({

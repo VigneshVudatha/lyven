@@ -1026,6 +1026,92 @@ export async function updateOrder(
   return updated;
 }
 
+/**
+ * Concurrency-Safe Atomic Transition: PENDING -> PAID
+ * Guarantees that even if simultaneous requests (e.g. client verification redirect and Razorpay webhook)
+ * arrive at the exact same millisecond, only ONE request can claim the transition.
+ * The winning request gets success: true.
+ * All subsequent or concurrent attempts receive success: false, alreadyPaid: true.
+ */
+export async function transitionOrderToPaid(
+  orderId: string,
+  razorpayPaymentId: string
+): Promise<{ success: boolean; order: Order | null; alreadyPaid: boolean }> {
+  const existing = await getOrderById(orderId);
+  if (!existing) {
+    return { success: false, order: null, alreadyPaid: false };
+  }
+
+  if (existing.paymentStatus === 'PAID') {
+    return { success: false, order: existing, alreadyPaid: true };
+  }
+
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = getSupabaseAdmin();
+      const now = new Date().toISOString();
+
+      // Atomic conditional update in PostgreSQL: only updates if payment_status != 'PAID'
+      const { data, error } = await supabase
+        .from('orders')
+        .update({
+          payment_status: 'PAID',
+          razorpay_payment_id: razorpayPaymentId,
+          updated_at: now,
+        })
+        .eq('id', orderId)
+        .neq('payment_status', 'PAID')
+        .select('*, order_items(*)')
+        .single();
+
+      if (error || !data) {
+        // Query matched 0 rows because another concurrent thread already changed status to PAID
+        const recheck = await getOrderById(orderId);
+        if (recheck?.paymentStatus === 'PAID') {
+          return { success: false, order: recheck, alreadyPaid: true };
+        }
+        return { success: false, order: existing, alreadyPaid: false };
+      }
+
+      const updatedOrder = mapRowToOrder(data);
+      inMemoryOrders.set(orderId, updatedOrder);
+
+      // Audit status transition in history
+      await supabase.from('order_status_history').insert({
+        order_id: orderId,
+        previous_status: existing.paymentStatus,
+        new_status: 'PAID',
+        change_type: 'PAYMENT',
+        notes: `Payment status atomically transitioned to PAID with ID ${razorpayPaymentId}`,
+        changed_by: 'system_payment_gateway',
+      });
+
+      return { success: true, order: updatedOrder, alreadyPaid: false };
+    } catch (err) {
+      console.error('[Supabase] transitionOrderToPaid failed:', err);
+    }
+  }
+
+  // In-Memory atomic transition check
+  const currentMem = inMemoryOrders.get(orderId);
+  if (!currentMem) {
+    return { success: false, order: null, alreadyPaid: false };
+  }
+  if (currentMem.paymentStatus === 'PAID') {
+    return { success: false, order: currentMem, alreadyPaid: true };
+  }
+
+  const updatedMem: Order = {
+    ...currentMem,
+    paymentStatus: 'PAID',
+    razorpayPaymentId,
+    updatedAt: new Date().toISOString(),
+  };
+  inMemoryOrders.set(orderId, updatedMem);
+
+  return { success: true, order: updatedMem, alreadyPaid: false };
+}
+
 export async function getAllOrders(): Promise<Order[]> {
   ensureDemoOrdersSeeded();
 

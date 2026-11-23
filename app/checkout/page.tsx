@@ -37,7 +37,7 @@ export default function CheckoutPage() {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('COD');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('ONLINE');
   const [idempotencyKey] = useState(generateIdempotencyKey);
 
   const [address, setAddress] = useState<OrderAddress>({

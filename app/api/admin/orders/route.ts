@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAuthenticatedAdmin } from '@/lib/admin/auth';
 import { getAllOrders, updateOrder, getOrderById } from '@/lib/db/repository';
+import {
+  sendOrderStatusUpdateNotification,
+  sendOrderCancellationNotification,
+} from '@/lib/email/notifications';
 import type { DashboardStats, FulfilmentStatus, PaymentStatus } from '@/types';
 
 export async function GET(req: NextRequest) {
@@ -71,6 +75,19 @@ export async function PATCH(req: NextRequest) {
     if (cancellationReason !== undefined) updates.cancellationReason = cancellationReason;
 
     const updated = await updateOrder(orderId, updates);
+
+    // Dispatch status update or cancellation notifications
+    try {
+      if (updated) {
+        if (fulfilmentStatus === 'CANCELLED' && order.fulfilmentStatus !== 'CANCELLED') {
+          await sendOrderCancellationNotification(updated, cancellationReason);
+        } else if (fulfilmentStatus && fulfilmentStatus !== order.fulfilmentStatus) {
+          await sendOrderStatusUpdateNotification(updated, order.fulfilmentStatus, fulfilmentStatus);
+        }
+      }
+    } catch (notifErr: any) {
+      console.warn('[Notifications] Admin order update notification warning:', notifErr?.message || notifErr);
+    }
 
     return NextResponse.json({
       success: true,

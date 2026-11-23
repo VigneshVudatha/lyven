@@ -6,7 +6,9 @@ import {
   deductVariantStock,
   getPaymentByOrderId,
   updatePayment,
+  transitionOrderToPaid,
 } from '@/lib/db/repository';
+import { sendPaymentSuccessNotification } from '@/lib/email/notifications';
 
 export async function POST(req: NextRequest) {
   try {
@@ -62,29 +64,43 @@ export async function POST(req: NextRequest) {
     }
 
     if (event === 'payment.captured' || event === 'order.paid') {
-      if (order.paymentStatus !== 'PAID') {
-        // Mark order as PAID
-        await updateOrder(order.id, {
-          paymentStatus: 'PAID',
-          razorpayPaymentId: rzpPaymentId || order.razorpayPaymentId,
-        });
+      // Concurrency-safe atomic claim of the transition to PAID
+      const claim = await transitionOrderToPaid(
+        order.id,
+        rzpPaymentId || order.razorpayPaymentId || 'WEBHOOK'
+      );
 
-        // Deduct inventory stock
-        for (const item of order.items) {
+      if (claim.success && claim.order) {
+        const paidOrder = claim.order;
+
+        // Deduct inventory stock: ONLY executed by the winning claim
+        for (const item of paidOrder.items) {
           await deductVariantStock(item.variantId, item.quantity);
         }
 
         // Update payment record
-        const paymentRecord = await getPaymentByOrderId(order.id);
+        const paymentRecord = await getPaymentByOrderId(paidOrder.id);
         if (paymentRecord) {
-          await updatePayment(order.id, {
+          await updatePayment(paidOrder.id, {
             razorpayPaymentId: rzpPaymentId || paymentRecord.razorpayPaymentId,
             verified: true,
             status: 'PAID',
           });
         }
 
-        console.log(`[Webhook] Order ${order.orderRef} marked as PAID via webhook event: ${event}`);
+        // Dispatch payment success notifications: ONLY executed by the winning claim
+        try {
+          await sendPaymentSuccessNotification(
+            paidOrder,
+            rzpPaymentId || paidOrder.razorpayPaymentId || 'WEBHOOK'
+          );
+        } catch (notifErr: any) {
+          console.warn('[Notifications] Webhook payment notification warning:', notifErr?.message || notifErr);
+        }
+
+        console.log(`[Webhook] Order ${paidOrder.orderRef} atomically claimed as PAID via webhook event: ${event}`);
+      } else {
+        console.log(`[Webhook] Order ${order.orderRef} was already claimed as PAID. Skipping duplicate processing.`);
       }
     } else if (event === 'payment.failed') {
       if (order.paymentStatus !== 'PAID') {
