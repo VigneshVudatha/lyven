@@ -14,33 +14,37 @@ export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
     const signature = req.headers.get('x-razorpay-signature');
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
 
-    // Validate signature if webhook secret is configured
-    if (webhookSecret) {
-      if (!signature) {
-        return NextResponse.json(
-          { success: false, error: 'Missing x-razorpay-signature header' },
-          { status: 400 }
-        );
-      }
+    // Fail-closed: Reject all requests with 500 if the secret is not configured
+    if (!webhookSecret) {
+      console.error('[Webhook] Gateway configuration error: RAZORPAY_WEBHOOK_SECRET is not configured');
+      return NextResponse.json(
+        { success: false, error: 'Webhook gateway secret is not configured' },
+        { status: 500 }
+      );
+    }
 
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(rawBody)
-        .digest('hex');
+    if (!signature) {
+      return NextResponse.json(
+        { success: false, error: 'Missing x-razorpay-signature header' },
+        { status: 400 }
+      );
+    }
 
-      const isSignatureValid = signatureSafeEqual(expectedSignature, signature);
+    const expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawBody)
+      .digest('hex');
 
-      if (!isSignatureValid) {
-        console.warn('[Webhook] Invalid Razorpay webhook signature');
-        return NextResponse.json(
-          { success: false, error: 'Invalid webhook signature' },
-          { status: 400 }
-        );
-      }
-    } else {
-      console.warn('[DEV] RAZORPAY_WEBHOOK_SECRET not configured, skipping webhook signature check');
+    const isSignatureValid = signatureSafeEqual(expectedSignature, signature);
+
+    if (!isSignatureValid) {
+      console.warn('[Webhook] Invalid Razorpay webhook signature');
+      return NextResponse.json(
+        { success: false, error: 'Invalid webhook signature' },
+        { status: 400 }
+      );
     }
 
     const payload = JSON.parse(rawBody);
