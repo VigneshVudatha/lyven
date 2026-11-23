@@ -1,7 +1,9 @@
 import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import ShopClient from './ShopClient';
-import { getProducts } from '@/lib/products/data';
+import { getAllProducts } from '@/lib/db/repository';
+
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: 'All T-Shirts — Men\'s Oversized Streetwear Collection',
@@ -16,7 +18,7 @@ interface ShopPageProps {
 async function ShopPageContent({ searchParams }: ShopPageProps) {
   const resolvedParams = await searchParams;
   const initialQuery = resolvedParams.q || '';
-  const products = getProducts();
+  const products = await getAllProducts();
 
   return <ShopClient initialProducts={products} initialQuery={initialQuery} />;
 }

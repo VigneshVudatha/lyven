@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateCheckoutPayload } from '@/lib/validation';
-import { getProductBySlug, getVariantById, SEED_PRODUCTS, SEED_VARIANTS } from '@/lib/products/data';
+import { isSupabaseConfigured } from '@/lib/supabase/admin';
 import { generateOrderRef, calculateTotals, sanitize } from '@/lib/utils';
 import type { CheckoutPayload, Order, OrderItem, PaymentRecord } from '@/types';
 
@@ -10,6 +10,7 @@ import {
   saveOrder,
   savePayment,
   deductVariantStock,
+  getAuthoritativeItemDetails,
   inMemoryOrders as orders,
   inMemoryPayments as payments,
 } from '@/lib/db/repository';
@@ -47,42 +48,87 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate items against server-side product data
+    // Authoritative check: Supabase must be configured to place real orders
+    if (!isSupabaseConfigured()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Order processing is temporarily unavailable. Product catalog could not be verified with database.',
+          code: 'DATABASE_UNAVAILABLE',
+        },
+        { status: 503 }
+      );
+    }
+
+    // Validate items against authoritative Supabase database product & variant data
     const orderItems: OrderItem[] = [];
 
     for (const item of body.items) {
-      const variant = SEED_VARIANTS.find((v) => v.id === item.variantId);
-      if (!variant || !variant.active) {
+      if (!item.productId || !item.variantId) {
         return NextResponse.json(
-          { success: false, error: `Invalid variant: ${item.variantId}` },
+          { success: false, error: 'Product ID and Variant ID are required for all items' },
           { status: 400 }
         );
       }
 
-      const product = SEED_PRODUCTS.find((p) => p.id === variant.productId);
-      if (!product || !product.active) {
+      let details;
+      try {
+        details = await getAuthoritativeItemDetails(item.productId, item.variantId);
+      } catch (itemErr: any) {
+        const msg = itemErr?.message || 'Item validation failed';
+        if (msg.includes('DATABASE_UNAVAILABLE') || msg.includes('DATABASE_ERROR')) {
+          return NextResponse.json(
+            { success: false, error: 'Database service unavailable. Unable to verify product pricing and inventory.', code: 'DATABASE_ERROR' },
+            { status: 503 }
+          );
+        }
+        if (msg.includes('VARIANT_NOT_FOUND')) {
+          return NextResponse.json(
+            { success: false, error: `Invalid variant: ${item.variantId}` },
+            { status: 400 }
+          );
+        }
+        if (msg.includes('VARIANT_MISMATCH')) {
+          return NextResponse.json(
+            { success: false, error: `Variant does not match the requested product: ${item.productId}` },
+            { status: 400 }
+          );
+        }
+        if (msg.includes('PRODUCT_NOT_FOUND') || msg.includes('PRODUCT_UNPUBLISHED') || msg.includes('VARIANT_INACTIVE')) {
+          return NextResponse.json(
+            { success: false, error: `Product or variant is currently not available for purchase` },
+            { status: 400 }
+          );
+        }
         return NextResponse.json(
-          { success: false, error: `Product not available` },
+          { success: false, error: msg },
           { status: 400 }
         );
       }
 
+      const { product, variant } = details;
+
+      // Validate quantity limits
       if (item.quantity < 1 || item.quantity > 5) {
         return NextResponse.json(
-          { success: false, error: `Invalid quantity for ${product.name}` },
+          { success: false, error: `Invalid quantity for ${product.name}. Allowed range: 1 to 5 units.` },
           { status: 400 }
         );
       }
 
-      // Check stock (in production, use Firestore transaction)
+      // Check authoritative stock from database
       if (variant.quantity < item.quantity) {
         return NextResponse.json(
-          { success: false, error: `Insufficient stock for ${product.name} (${variant.size})` },
+          {
+            success: false,
+            error: `Insufficient stock for ${product.name} (${variant.size}). Only ${variant.quantity} available.`,
+            code: 'INSUFFICIENT_STOCK',
+          },
           { status: 400 }
         );
       }
 
-      // Use SERVER-SIDE price, never trust client
+      // Use strictly SERVER-SIDE authoritative price from Supabase database (never trust client)
       orderItems.push({
         productId: product.id,
         variantId: variant.id,

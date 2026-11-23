@@ -525,6 +525,79 @@ export async function getVariantById(variantId: string): Promise<ProductVariant 
   return memoryVariants.get(variantId);
 }
 
+/**
+ * Authoritative checkout item retrieval directly from Supabase.
+ * Unlike getProductById/getVariantById, this function DOES NOT fall back to seed data.
+ * If Supabase is unavailable or data is invalid/inactive, it throws an error to prevent charging outdated prices.
+ */
+export async function getAuthoritativeItemDetails(
+  productId: string,
+  variantId: string
+): Promise<{ product: Product; variant: ProductVariant }> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('DATABASE_UNAVAILABLE: Supabase database is not configured');
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  // 1. Fetch variant directly from database
+  const { data: variantRow, error: varErr } = await supabase
+    .from('product_variants')
+    .select('*')
+    .eq('id', variantId)
+    .maybeSingle();
+
+  if (varErr) {
+    throw new Error(`DATABASE_ERROR: ${varErr.message}`);
+  }
+  if (!variantRow) {
+    throw new Error(`VARIANT_NOT_FOUND: Variant ${variantId} does not exist`);
+  }
+  if (!variantRow.is_active) {
+    throw new Error(`VARIANT_INACTIVE: Variant ${variantId} is not active for sale`);
+  }
+  if (variantRow.product_id !== productId) {
+    throw new Error(`VARIANT_MISMATCH: Variant ${variantId} does not belong to product ${productId}`);
+  }
+
+  // 2. Fetch product directly from database
+  const { data: productRow, error: prodErr } = await supabase
+    .from('products')
+    .select('*')
+    .eq('id', productId)
+    .maybeSingle();
+
+  if (prodErr) {
+    throw new Error(`DATABASE_ERROR: ${prodErr.message}`);
+  }
+  if (!productRow) {
+    throw new Error(`PRODUCT_NOT_FOUND: Product ${productId} does not exist`);
+  }
+  if (!productRow.is_published) {
+    throw new Error(`PRODUCT_UNPUBLISHED: Product ${productId} is currently unpublished`);
+  }
+
+  // 3. Fetch images for product display
+  const { data: imagesData } = await supabase
+    .from('product_images')
+    .select('*')
+    .eq('product_id', productId)
+    .order('display_order', { ascending: true });
+
+  const product = mapRowToProduct(productRow, imagesData || []);
+  const variant: ProductVariant = {
+    id: variantRow.id,
+    productId: variantRow.product_id,
+    size: variantRow.size,
+    color: variantRow.color || 'Jet Black',
+    sku: variantRow.sku,
+    quantity: variantRow.quantity,
+    active: variantRow.is_active,
+  };
+
+  return { product, variant };
+}
+
 export async function updateVariantQuantity(
   variantId: string,
   quantity: number,
@@ -775,7 +848,7 @@ export async function saveOrder(order: Order & { idempotencyKey: string }): Prom
 
       if (orderErr) {
         console.error('[Supabase] Failed to save order:', orderErr.message);
-        return;
+        throw new Error(`Failed to save order in database: ${orderErr.message}`);
       }
 
       // 2. Insert order items

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { isAuthenticatedAdmin } from '@/lib/admin/auth';
 import {
   getAllProductsAdmin,
@@ -119,6 +120,18 @@ export async function POST(req: NextRequest) {
       variants: finalVariants,
     });
 
+    // Invalidate public storefront caches
+    try {
+      revalidatePath('/');
+      revalidatePath('/shop');
+      revalidatePath('/search');
+      if (newProduct?.slug) {
+        revalidatePath(`/products/${newProduct.slug}`);
+      }
+    } catch (revalErr) {
+      console.warn('[Cache Revalidation] Failed in POST /api/admin/products:', revalErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Product created successfully',
@@ -166,6 +179,21 @@ export async function PATCH(req: NextRequest) {
       isPublished: publishState,
     });
 
+    // Invalidate public storefront caches
+    try {
+      revalidatePath('/');
+      revalidatePath('/shop');
+      revalidatePath('/search');
+      if (updated?.slug) {
+        revalidatePath(`/products/${updated.slug}`);
+      }
+      if (existing?.slug && existing.slug !== updated?.slug) {
+        revalidatePath(`/products/${existing.slug}`);
+      }
+    } catch (revalErr) {
+      console.warn('[Cache Revalidation] Failed in PATCH /api/admin/products:', revalErr);
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Product updated successfully',
@@ -194,9 +222,23 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Product ID is required' }, { status: 400 });
     }
 
+    const existing = await getProductById(id);
+
     const archived = await archiveProduct(id);
     if (!archived) {
       return NextResponse.json({ success: false, error: 'Failed to archive product' }, { status: 404 });
+    }
+
+    // Invalidate public storefront caches
+    try {
+      revalidatePath('/');
+      revalidatePath('/shop');
+      revalidatePath('/search');
+      if (existing?.slug) {
+        revalidatePath(`/products/${existing.slug}`);
+      }
+    } catch (revalErr) {
+      console.warn('[Cache Revalidation] Failed in DELETE /api/admin/products:', revalErr);
     }
 
     return NextResponse.json({

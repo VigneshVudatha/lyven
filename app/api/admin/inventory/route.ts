@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { isAuthenticatedAdmin } from '@/lib/admin/auth';
-import { getInventoryMatrix, updateVariantQuantity } from '@/lib/db/repository';
+import { getInventoryMatrix, updateVariantQuantity, getProductById } from '@/lib/db/repository';
 
 export async function GET(req: NextRequest) {
   const isAuthed = await isAuthenticatedAdmin(req);
@@ -41,6 +42,20 @@ export async function PATCH(req: NextRequest) {
     const updated = await updateVariantQuantity(variantId, q ?? 0, active !== undefined ? Boolean(active) : undefined);
     if (!updated) {
       return NextResponse.json({ success: false, error: 'Variant not found' }, { status: 404 });
+    }
+
+    // Invalidate public storefront caches
+    try {
+      revalidatePath('/');
+      revalidatePath('/shop');
+      revalidatePath('/search');
+
+      const parentProduct = await getProductById(updated.productId);
+      if (parentProduct?.slug) {
+        revalidatePath(`/products/${parentProduct.slug}`);
+      }
+    } catch (revalErr) {
+      console.warn('[Cache Revalidation] Failed in PATCH /api/admin/inventory:', revalErr);
     }
 
     return NextResponse.json({

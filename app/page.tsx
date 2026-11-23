@@ -2,10 +2,12 @@ import Link from 'next/link';
 import { ArrowRight, Sparkles, MessageCircle } from 'lucide-react';
 import ArchitecturalHero from '@/components/home/ArchitecturalHero';
 import ProductCard from '@/components/products/ProductCard';
-import { getProducts } from '@/lib/products/data';
+import { getAllProducts } from '@/lib/db/repository';
 
-export default function HomePage() {
-  const products = getProducts();
+export const revalidate = 60;
+
+export default async function HomePage() {
+  const products = await getAllProducts();
 
   return (
     <div className="bg-[#FAF8F3] text-[#0B0B0D] min-h-screen relative font-sans">
