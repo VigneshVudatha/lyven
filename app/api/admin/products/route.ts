@@ -7,6 +7,7 @@ import {
   createProduct,
   updateProduct,
   archiveProduct,
+  deleteProductPermanently,
   getVariantsForProduct,
 } from '@/lib/db/repository';
 
@@ -217,16 +218,32 @@ export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
+    const permanent = searchParams.get('permanent') === 'true';
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Product ID is required' }, { status: 400 });
     }
 
     const existing = await getProductById(id);
+    if (!existing) {
+      return NextResponse.json({ success: false, error: 'Product not found' }, { status: 404 });
+    }
 
-    const archived = await archiveProduct(id);
-    if (!archived) {
-      return NextResponse.json({ success: false, error: 'Failed to archive product' }, { status: 404 });
+    let message = 'Product archived successfully. Historical order data remains intact.';
+    let permanentlyDeleted = false;
+    let archived = false;
+
+    if (permanent) {
+      const res = await deleteProductPermanently(id);
+      message = res.message;
+      permanentlyDeleted = res.deleted;
+      archived = res.archived;
+    } else {
+      const isArchived = await archiveProduct(id);
+      if (!isArchived) {
+        return NextResponse.json({ success: false, error: 'Failed to archive product' }, { status: 500 });
+      }
+      archived = true;
     }
 
     // Invalidate public storefront caches
@@ -243,11 +260,13 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Product archived successfully. Historical order data remains intact.',
+      message,
+      permanentlyDeleted,
+      archived,
     });
   } catch (err: any) {
     return NextResponse.json(
-      { success: false, error: err.message || 'Failed to archive product' },
+      { success: false, error: err.message || 'Failed to process product deletion' },
       { status: 500 }
     );
   }

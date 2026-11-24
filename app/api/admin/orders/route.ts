@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isAuthenticatedAdmin } from '@/lib/admin/auth';
-import { getAllOrders, updateOrder, getOrderById } from '@/lib/db/repository';
+import {
+  getAllOrders,
+  updateOrder,
+  getOrderById,
+  deleteTestOrder,
+  markOrderAsTest,
+  archiveOrder,
+  deleteOrder,
+  checkOrderDeletionEligibility,
+} from '@/lib/db/repository';
 import {
   sendOrderStatusUpdateNotification,
   sendOrderCancellationNotification,
@@ -54,7 +63,18 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { orderId, fulfilmentStatus, paymentStatus, courierName, trackingId, trackingUrl, notes, cancellationReason } = body;
+    const {
+      orderId,
+      fulfilmentStatus,
+      paymentStatus,
+      courierName,
+      trackingId,
+      trackingUrl,
+      notes,
+      cancellationReason,
+      isTest,
+      isArchived,
+    } = body;
 
     if (!orderId) {
       return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
@@ -63,6 +83,21 @@ export async function PATCH(req: NextRequest) {
     const order = await getOrderById(orderId);
     if (!order) {
       return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
+    }
+
+    // Explicit archive / restore
+    if (isArchived !== undefined) {
+      const archived = await archiveOrder(orderId, Boolean(isArchived));
+      return NextResponse.json({
+        success: true,
+        message: isArchived ? 'Order archived successfully' : 'Order restored successfully',
+        data: archived,
+      });
+    }
+
+    // Explicit test tagging
+    if (isTest !== undefined) {
+      await markOrderAsTest(orderId, Boolean(isTest));
     }
 
     const updates: any = {};
@@ -96,5 +131,51 @@ export async function PATCH(req: NextRequest) {
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: 'Update failed' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  const isAuthed = await isAuthenticatedAdmin(req);
+  if (!isAuthed) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { searchParams } = new URL(req.url);
+    let orderId = searchParams.get('orderId');
+    let hardDelete = searchParams.get('hardDelete') === 'true';
+
+    // Also support JSON body if sent via fetch DELETE with body
+    if (!orderId) {
+      const body = await req.json().catch(() => ({}));
+      orderId = body.orderId;
+      if (body.hardDelete !== undefined) hardDelete = Boolean(body.hardDelete);
+    }
+
+    if (!orderId) {
+      return NextResponse.json({ success: false, error: 'Order ID is required' }, { status: 400 });
+    }
+
+    const result = await deleteOrder(orderId, hardDelete);
+
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: result.error,
+          suggestArchive: result.suggestArchive,
+        },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: result.message,
+      archived: result.archived,
+      permanentlyDeleted: result.permanentlyDeleted,
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err?.message || 'Delete operation failed' }, { status: 500 });
   }
 }

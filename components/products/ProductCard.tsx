@@ -20,7 +20,8 @@ export default function ProductCard({ product }: ProductCardProps) {
     setMounted(true);
   }, []);
 
-  const hasImage = product.images && product.images.length > 0;
+  const primaryImage = product.images?.find((img) => img.isPrimary) || product.images?.[0];
+  const hasImage = Boolean(primaryImage?.url);
   const wishlisted = mounted && isInWishlist;
 
   const handleWishlistClick = (e: React.MouseEvent) => {
@@ -37,10 +38,10 @@ export default function ProductCard({ product }: ProductCardProps) {
         className="relative aspect-[4/5] bg-[#F4F3ED] overflow-hidden flex items-center justify-center p-2.5 sm:p-4 select-none shrink-0"
         aria-label={`View ${product.name}`}
       >
-        {hasImage ? (
+        {hasImage && primaryImage ? (
           <img
-            src={product.images[0].url}
-            alt={product.images[0].alt || product.name}
+            src={primaryImage.url}
+            alt={primaryImage.alt || product.name}
             className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
             loading="lazy"
           />

@@ -131,12 +131,19 @@ function mapRowToProduct(p: any, images: any[] = []): Product {
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     images: images
-      .sort((a, b) => a.display_order - b.display_order)
+      .sort((a, b) => {
+        // Primary image is prioritized at index 0
+        if (a.is_primary && !b.is_primary) return -1;
+        if (!a.is_primary && b.is_primary) return 1;
+        return (a.display_order ?? 0) - (b.display_order ?? 0);
+      })
       .map((img) => ({
+        id: img.id,
         url: img.url,
         alt: img.alt_text || p.name,
         type: img.image_type || 'front',
-        order: img.display_order || 0,
+        order: img.display_order ?? 0,
+        isPrimary: Boolean(img.is_primary),
       })),
   };
 }
@@ -268,7 +275,7 @@ export async function createProduct(productData: {
   fabric?: string;
   careInstructions?: string;
   isPublished?: boolean;
-  images?: { url: string; altText?: string; imageType?: string; displayOrder?: number }[];
+  images?: { url: string; altText?: string; imageType?: string; displayOrder?: number; isPrimary?: boolean }[];
   variants?: { size: string; color?: string; sku: string; quantity: number }[];
 }): Promise<Product> {
   const newId = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -301,8 +308,9 @@ export async function createProduct(productData: {
       throw new Error(`Failed to create product in database: ${prodErr.message}`);
     }
 
-    // 2. Insert Images
+    // 2. Insert Images (supporting primary image flag)
     if (productData.images && productData.images.length > 0) {
+      const hasExplicitPrimary = productData.images.some((img) => img.isPrimary);
       const imageRows = productData.images.map((img, idx) => ({
         id: `img_${Date.now()}_${idx}`,
         product_id: newId,
@@ -310,7 +318,7 @@ export async function createProduct(productData: {
         alt_text: img.altText || productData.name,
         image_type: img.imageType || 'front',
         display_order: img.displayOrder !== undefined ? img.displayOrder : idx,
-        is_primary: idx === 0,
+        is_primary: hasExplicitPrimary ? Boolean(img.isPrimary) : idx === 0,
       }));
       await supabase.from('product_images').insert(imageRows);
     }
@@ -381,7 +389,7 @@ export async function updateProduct(
     category?: string;
     careInstructions?: string;
     isPublished?: boolean;
-    images?: { url: string; altText?: string; imageType?: string; displayOrder?: number }[];
+    images?: { url: string; altText?: string; imageType?: string; displayOrder?: number; isPrimary?: boolean }[];
   }
 ): Promise<Product | null> {
   const now = new Date().toISOString();
@@ -403,18 +411,21 @@ export async function updateProduct(
       throw new Error(`Failed to update product: ${updErr.message}`);
     }
 
-    if (updates.images && updates.images.length > 0) {
+    if (updates.images !== undefined) {
       await supabase.from('product_images').delete().eq('product_id', id);
-      const imageRows = updates.images.map((img, idx) => ({
-        id: `img_${Date.now()}_${idx}`,
-        product_id: id,
-        url: img.url,
-        alt_text: img.altText || updates.name || 'LYVEN Apparel',
-        image_type: img.imageType || 'front',
-        display_order: img.displayOrder !== undefined ? img.displayOrder : idx,
-        is_primary: idx === 0,
-      }));
-      await supabase.from('product_images').insert(imageRows);
+      if (updates.images.length > 0) {
+        const hasExplicitPrimary = updates.images.some((img) => img.isPrimary);
+        const imageRows = updates.images.map((img, idx) => ({
+          id: `img_${Date.now()}_${idx}`,
+          product_id: id,
+          url: img.url,
+          alt_text: img.altText || updates.name || 'LYVEN Apparel',
+          image_type: img.imageType || 'front',
+          display_order: img.displayOrder !== undefined ? img.displayOrder : idx,
+          is_primary: hasExplicitPrimary ? Boolean(img.isPrimary) : idx === 0,
+        }));
+        await supabase.from('product_images').insert(imageRows);
+      }
     }
 
     return (await getProductById(id)) || null;
@@ -439,7 +450,8 @@ export async function updateProduct(
           url: img.url,
           alt: img.altText || existing.name,
           type: (img.imageType as any) || 'front',
-          order: i,
+          order: img.displayOrder !== undefined ? img.displayOrder : i,
+          isPrimary: img.isPrimary !== undefined ? img.isPrimary : i === 0,
         }))
       : existing.images,
   };
@@ -459,6 +471,70 @@ export async function archiveProduct(id: string): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+export async function deleteProductPermanently(id: string): Promise<{
+  success: boolean;
+  deleted: boolean;
+  archived: boolean;
+  message: string;
+}> {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin();
+
+    // Safety check: Does this product have existing order items?
+    const { count, error: countErr } = await supabase
+      .from('order_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('product_id', id);
+
+    if (!countErr && count && count > 0) {
+      // Historical orders exist! Protect sales history by archiving instead
+      await archiveProduct(id);
+      return {
+        success: true,
+        deleted: false,
+        archived: true,
+        message: `Product is linked to ${count} historical customer order(s). It has been safely archived to protect order records.`,
+      };
+    }
+
+    // Zero customer orders exist - safe to permanently delete test product
+    await supabase.from('product_images').delete().eq('product_id', id);
+    await supabase.from('inventory_movements').delete().eq('product_id', id);
+    await supabase.from('product_variants').delete().eq('product_id', id);
+    const { error: delErr } = await supabase.from('products').delete().eq('id', id);
+
+    if (delErr) {
+      throw new Error(`Failed to delete product: ${delErr.message}`);
+    }
+
+    return {
+      success: true,
+      deleted: true,
+      archived: false,
+      message: 'Test product and associated inventory permanently deleted.',
+    };
+  }
+
+  // Memory fallback
+  const prod = memoryProducts.get(id);
+  if (prod) {
+    memoryProducts.delete(id);
+    return {
+      success: true,
+      deleted: true,
+      archived: false,
+      message: 'Product deleted from memory store.',
+    };
+  }
+
+  return {
+    success: false,
+    deleted: false,
+    archived: false,
+    message: 'Product not found.',
+  };
 }
 
 // ====================================================================
@@ -752,6 +828,25 @@ export async function getOrderByKey(key: string): Promise<Order | null> {
   return null;
 }
 
+function isTestOrderRow(row: any): boolean {
+  if (row.is_test) return true;
+  const notes = (row.notes || '').toUpperCase();
+  if (notes.includes('[TEST_ORDER]') || notes.includes('[TEST]') || notes.includes('[DUMMY]')) return true;
+  const email = (row.customer_email || '').toLowerCase();
+  if (email.endsWith('@example.com') || email.endsWith('@test.com') || email.endsWith('@dummy.com')) return true;
+  const name = (row.customer_full_name || '').toLowerCase();
+  if (name.includes('test order') || name.includes('dummy') || name.includes('test user')) return true;
+  const ref = (row.order_ref || '').toUpperCase();
+  if (ref.includes('-TEST-') || ref.includes('RACE')) return true;
+  return false;
+}
+
+function isArchivedOrderRow(row: any): boolean {
+  if (row.is_archived) return true;
+  const notes = (row.notes || '').toUpperCase();
+  return notes.includes('[ARCHIVED]') || notes.includes('[ARCHIVE]');
+}
+
 function mapRowToOrder(row: any): Order {
   return {
     id: row.id,
@@ -794,6 +889,8 @@ function mapRowToOrder(row: any): Order {
     razorpayOrderId: row.razorpay_order_id || undefined,
     razorpayPaymentId: row.razorpay_payment_id || undefined,
     notes: row.notes || undefined,
+    isTest: isTestOrderRow(row),
+    isArchived: isArchivedOrderRow(row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1024,6 +1121,259 @@ export async function updateOrder(
   }
 
   return updated;
+}
+
+/**
+ * Identify whether an order is a test/dummy order safely.
+ * Never assumes old orders are dummy orders. Requires clear test markers.
+ */
+export function isTestOrder(order: Order): boolean {
+  if (order.isTest) return true;
+  const notes = (order.notes || '').toUpperCase();
+  if (notes.includes('[TEST_ORDER]') || notes.includes('[TEST]') || notes.includes('[DUMMY]') || notes.includes('[ARCHIVED_TEST_ORDER]')) return true;
+  const email = (order.customer.email || '').toLowerCase();
+  if (email.endsWith('@example.com') || email.endsWith('@test.com') || email.endsWith('@dummy.com')) return true;
+  const name = order.customer.fullName.toLowerCase();
+  if (name.includes('test order') || name.includes('dummy') || name.includes('test user')) return true;
+  const ref = order.orderRef.toUpperCase();
+  if (ref.includes('-TEST-') || ref.includes('RACE')) return true;
+  return false;
+}
+
+/**
+ * Explicitly tag or untag an order as a test order.
+ */
+export async function markOrderAsTest(
+  orderId: string,
+  isTest: boolean = true
+): Promise<{ success: boolean; order?: Order; error?: string }> {
+  const order = await getOrderById(orderId);
+  if (!order) {
+    return { success: false, error: 'Order not found' };
+  }
+
+  let currentNotes = order.notes || '';
+  if (isTest && !currentNotes.includes('[TEST_ORDER]')) {
+    currentNotes = `[TEST_ORDER] ${currentNotes}`.trim();
+  } else if (!isTest && currentNotes.includes('[TEST_ORDER]')) {
+    currentNotes = currentNotes.replace(/\[TEST_ORDER\]/g, '').trim();
+  }
+
+  const updated = await updateOrder(orderId, { notes: currentNotes });
+  if (updated) {
+    updated.isTest = isTest;
+  }
+  return { success: true, order: updated || undefined };
+}
+
+/**
+ * Safely delete or archive a verified test order.
+ * CRITICAL SAFETY RULES:
+ * 1. Blocks deletion of genuine production orders.
+ * 2. Restores deducted inventory units to keep inventory consistent.
+ * 3. Supports permanent deletion (for test data cleanup) or safe archiving.
+ */
+export async function deleteTestOrder(
+  orderId: string,
+  hardDelete: boolean = false
+): Promise<{ success: boolean; error?: string; restoredStockUnits?: number; message?: string }> {
+  const order = await getOrderById(orderId);
+  if (!order) {
+    return { success: false, error: 'Order not found' };
+  }
+
+  // CRITICAL PRODUCTION SAFETY: Verify order is a test order
+  if (!isTestOrder(order)) {
+    return {
+      success: false,
+      error: 'CRITICAL SAFETY GUARD: Genuine customer orders cannot be deleted. Only verified test orders can be removed or archived.',
+    };
+  }
+
+  // Restore inventory if stock was deducted for this test order
+  let restoredStockUnits = 0;
+  if (order.fulfilmentStatus !== 'CANCELLED') {
+    for (const item of order.items) {
+      if (item.variantId) {
+        const variant = await getVariantById(item.variantId);
+        if (variant) {
+          await updateVariantQuantity(
+            item.variantId,
+            variant.quantity + item.quantity,
+            undefined,
+            'ORDER_CANCELLED'
+          );
+          restoredStockUnits += item.quantity;
+        }
+      }
+    }
+  }
+
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin();
+
+    if (hardDelete) {
+      // Hard delete: delete from orders table (cascades to order_items, payments, order_status_history)
+      const { error: delErr } = await supabase.from('orders').delete().eq('id', orderId);
+      if (delErr) {
+        return { success: false, error: `Database delete failed: ${delErr.message}` };
+      }
+      inMemoryOrders.delete(orderId);
+      return {
+        success: true,
+        restoredStockUnits,
+        message: `Test order ${order.orderRef} permanently deleted and ${restoredStockUnits} stock units restored.`,
+      };
+    } else {
+      // Soft delete / archive
+      const archivedNotes = `[ARCHIVED_TEST_ORDER] ${order.notes || ''}`.trim();
+      const updated = await updateOrder(orderId, {
+        fulfilmentStatus: 'CANCELLED',
+        notes: archivedNotes,
+      });
+      return {
+        success: true,
+        restoredStockUnits,
+        message: `Test order ${order.orderRef} archived and ${restoredStockUnits} stock units restored.`,
+      };
+    }
+  }
+
+  // Memory fallback
+  inMemoryOrders.delete(orderId);
+  return {
+    success: true,
+    restoredStockUnits,
+    message: `Test order ${order.orderRef} removed from memory store.`,
+  };
+}
+
+export function isOrderArchived(order: Order): boolean {
+  if (order.isArchived) return true;
+  const notes = (order.notes || '').toUpperCase();
+  return notes.includes('[ARCHIVED]') || notes.includes('[ARCHIVE]');
+}
+
+export async function archiveOrder(orderId: string, archive: boolean = true): Promise<Order | null> {
+  const order = await getOrderById(orderId);
+  if (!order) return null;
+
+  let currentNotes = order.notes || '';
+  if (archive) {
+    if (!currentNotes.toUpperCase().includes('[ARCHIVED]')) {
+      currentNotes = currentNotes ? `[ARCHIVED] ${currentNotes}` : '[ARCHIVED]';
+    }
+  } else {
+    // Restore: strip [ARCHIVED] and [ARCHIVE]
+    currentNotes = currentNotes
+      .replace(/\[ARCHIVED\]/gi, '')
+      .replace(/\[ARCHIVE\]/gi, '')
+      .trim();
+  }
+
+  const updated = await updateOrder(orderId, { notes: currentNotes });
+  if (updated) {
+    updated.isArchived = archive;
+    inMemoryOrders.set(orderId, updated);
+  }
+  return updated;
+}
+
+export interface OrderDeletionEligibility {
+  canPermanentlyDelete: boolean;
+  reason: string;
+  suggestArchive: boolean;
+}
+
+export function checkOrderDeletionEligibility(order: Order): OrderDeletionEligibility {
+  // 1. Financial Record Protection
+  // If payment status is PAID, REFUNDED or has an active Razorpay payment record
+  if (order.paymentStatus === 'PAID' || order.paymentStatus === 'REFUNDED' || Boolean(order.razorpayPaymentId)) {
+    return {
+      canPermanentlyDelete: false,
+      reason: `This order contains verified payment records (Payment Status: ${order.paymentStatus}${
+        order.razorpayPaymentId ? `, Payment ID: ${order.razorpayPaymentId}` : ''
+      }). Indian GST regulations, financial accounting standards, and Razorpay merchant compliance mandate retaining all monetary transaction records for audit compliance. Permanent deletion is blocked to prevent loss of financial audit history. You can safely Archive this order instead to remove it from active operational views.`,
+      suggestArchive: true,
+    };
+  }
+
+  // 2. Active Customer Order Protection
+  // Live customer orders that are in CONFIRMED, PROCESSING, SHIPPED, or DELIVERED status
+  if (!order.isTest && order.fulfilmentStatus !== 'CANCELLED') {
+    return {
+      canPermanentlyDelete: false,
+      reason: `This is an active live customer order (Fulfillment Status: ${order.fulfilmentStatus}). Customer order history and delivery tracking must be preserved for customer service, delivery proof, and dispute defense. You can safely Archive this order instead.`,
+      suggestArchive: true,
+    };
+  }
+
+  // 3. Eligible for permanent delete (unpaid test/dummy orders or cancelled records with no payment liability)
+  return {
+    canPermanentlyDelete: true,
+    reason: `This order has no verified monetary transactions or active customer fulfillment liabilities. It is eligible for permanent removal.`,
+    suggestArchive: false,
+  };
+}
+
+export async function deleteOrder(
+  orderId: string,
+  hardDelete: boolean = false
+): Promise<{
+  success: boolean;
+  canPermanentlyDelete?: boolean;
+  error?: string;
+  message?: string;
+  suggestArchive?: boolean;
+  archived?: boolean;
+  permanentlyDeleted?: boolean;
+}> {
+  const order = await getOrderById(orderId);
+  if (!order) {
+    return { success: false, error: 'Order not found' };
+  }
+
+  // If hardDelete is false, safely archive the order
+  if (!hardDelete) {
+    const archived = await archiveOrder(orderId, true);
+    if (!archived) {
+      return { success: false, error: 'Failed to archive order' };
+    }
+    return {
+      success: true,
+      archived: true,
+      permanentlyDeleted: false,
+      message: `Order ${order.orderRef} was safely archived. All financial, audit, and customer records remain preserved.`,
+    };
+  }
+
+  // Server-side recheck of authorization and eligibility
+  const eligibility = checkOrderDeletionEligibility(order);
+  if (!eligibility.canPermanentlyDelete) {
+    return {
+      success: false,
+      canPermanentlyDelete: false,
+      error: eligibility.reason,
+      suggestArchive: true,
+    };
+  }
+
+  // Permanently delete eligible order
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseAdmin();
+    const { error: delErr } = await supabase.from('orders').delete().eq('id', orderId);
+    if (delErr) {
+      return { success: false, error: `Database delete failed: ${delErr.message}` };
+    }
+  }
+
+  inMemoryOrders.delete(orderId);
+  return {
+    success: true,
+    archived: false,
+    permanentlyDeleted: true,
+    message: `Order ${order.orderRef} was permanently deleted from the database.`,
+  };
 }
 
 /**

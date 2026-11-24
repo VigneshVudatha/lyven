@@ -110,7 +110,7 @@ export default function HeaderSearch() {
                 >
                   <div className="w-12 h-12 rounded-lg bg-neutral-900 border border-white/10 overflow-hidden shrink-0 flex items-center justify-center">
                     <img
-                      src={product.images[0]?.url || '/products/virat-kohli-front.svg'}
+                      src={product.images?.find((i) => i.isPrimary)?.url || product.images?.[0]?.url || '/products/virat-kohli-front.svg'}
                       alt={product.name}
                       className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
                     />

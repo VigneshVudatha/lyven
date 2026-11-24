@@ -12,6 +12,8 @@ import {
   MessageCircle,
   Sparkles,
   ShieldCheck,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import type { Product, ProductVariant, Size } from '@/types';
 import { useCartStore } from '@/lib/cart/store';
@@ -32,11 +34,15 @@ export default function ProductDetailClient({
   const router = useRouter();
   const addItem = useCartStore((s) => s.addItem);
 
-  const [activeImageIdx, setActiveImageIdx] = useState(0);
+  const initialPrimaryIdx = product.images.findIndex((img) => img.isPrimary);
+  const [activeImageIdx, setActiveImageIdx] = useState(initialPrimaryIdx >= 0 ? initialPrimaryIdx : 0);
   const [selectedSize, setSelectedSize] = useState<Size | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [addedToCart, setAddedToCart] = useState(false);
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+
+  const primaryImageObj = product.images.find((img) => img.isPrimary) || product.images[0];
+  const primaryImageUrl = primaryImageObj?.url || '';
 
   // Get available sizes from variants
   const availableSizes = variants.map((v) => ({
@@ -64,7 +70,7 @@ export default function ProductDetailClient({
       pricePaise: product.pricePaise,
       size: selectedSize,
       color: selectedVariant.color,
-      image: product.images[0]?.url || '',
+      image: primaryImageUrl,
       quantity,
     });
 
@@ -84,7 +90,7 @@ export default function ProductDetailClient({
       pricePaise: product.pricePaise,
       size: selectedSize,
       color: selectedVariant.color,
-      image: product.images[0]?.url || '',
+      image: primaryImageUrl,
       quantity,
     });
 
@@ -139,6 +145,35 @@ export default function ProductDetailClient({
                   240 GSM French Terry
                 </span>
               </div>
+
+              {/* Prev / Next Arrows for Multi-image Navigation */}
+              {product.images.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveImageIdx((prev) => (prev > 0 ? prev - 1 : product.images.length - 1))
+                    }
+                    aria-label="Previous product image"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-[#0B0B0D] border border-[#E7E5DD] shadow-sm flex items-center justify-center transition-all z-10 touch-manipulation opacity-85 hover:opacity-100 hover:scale-105"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveImageIdx((prev) => (prev < product.images.length - 1 ? prev + 1 : 0))
+                    }
+                    aria-label="Next product image"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-white/90 hover:bg-white text-[#0B0B0D] border border-[#E7E5DD] shadow-sm flex items-center justify-center transition-all z-10 touch-manipulation opacity-85 hover:opacity-100 hover:scale-105"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                  <div className="absolute bottom-3 right-3 z-10 px-2.5 py-1 rounded-full bg-[#0B0B0D]/80 backdrop-blur-md text-[10px] font-mono text-white font-bold tracking-wider">
+                    {activeImageIdx + 1} / {product.images.length}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Thumbnail Switchers with right padding for floating action clear */}
@@ -157,9 +192,16 @@ export default function ProductDetailClient({
                     }`}
                   >
                     <img src={img.url} alt={img.alt} className="w-full h-full object-contain p-1" />
-                    <span className="absolute bottom-1 right-1 text-[8px] font-mono uppercase bg-[#0B0B0D] text-white px-1 py-0.5 rounded font-bold">
-                      {img.type}
-                    </span>
+                    <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                      {img.isPrimary && (
+                        <span className="text-[7px] font-mono uppercase bg-[#C9A45C] text-black px-1 py-0.5 rounded font-extrabold">
+                          Cover
+                        </span>
+                      )}
+                      <span className="text-[8px] font-mono uppercase bg-[#0B0B0D] text-white px-1 py-0.5 rounded font-bold">
+                        {img.type}
+                      </span>
+                    </div>
                   </button>
                 ))}
               </div>

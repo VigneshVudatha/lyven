@@ -16,10 +16,12 @@ export interface Product {
 }
 
 export interface ProductImage {
+  id?: string;
   url: string;
   alt: string;
-  type: 'front' | 'back' | 'detail' | 'lifestyle';
+  type: 'front' | 'back' | 'detail' | 'lifestyle' | 'model' | 'gallery';
   order: number;
+  isPrimary?: boolean;
 }
 
 export interface ProductVariant {
@@ -108,6 +110,8 @@ export interface Order {
   trackingUrl?: string;
   cancellationReason?: string;
   notes?: string;
+  isTest?: boolean;
+  isArchived?: boolean;
   createdAt: string;
   updatedAt: string;
 }

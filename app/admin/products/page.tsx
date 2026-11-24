@@ -17,6 +17,12 @@ import {
   X,
   UploadCloud,
   Check,
+  Trash2,
+  Star,
+  ArrowLeft,
+  ArrowRight,
+  ImagePlus,
+  AlertTriangle,
 } from 'lucide-react';
 import { formatINR } from '@/lib/utils';
 import type { Product, ProductVariant } from '@/types';
@@ -24,6 +30,14 @@ import type { Product, ProductVariant } from '@/types';
 interface ProductWithMeta extends Product {
   variants?: ProductVariant[];
   totalStock?: number;
+}
+
+interface ProductFormImage {
+  url: string;
+  altText: string;
+  imageType: string;
+  isPrimary: boolean;
+  displayOrder: number;
 }
 
 export default function AdminProductsPage() {
@@ -35,12 +49,27 @@ export default function AdminProductsPage() {
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [deleteModalProduct, setDeleteModalProduct] = useState<ProductWithMeta | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
+  const [manualImageUrl, setManualImageUrl] = useState('');
 
   // Form states
   const [editingProduct, setEditingProduct] = useState<ProductWithMeta | null>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    slug: string;
+    description: string;
+    price: string;
+    category: string;
+    fit: string;
+    fabric: string;
+    careInstructions: string;
+    isPublished: boolean;
+    images: ProductFormImage[];
+    sizes: Record<string, number>;
+  }>({
     name: '',
     slug: '',
     description: '',
@@ -50,8 +79,7 @@ export default function AdminProductsPage() {
     fabric: '240 GSM French Terry Combed Cotton',
     careInstructions: 'Machine wash cold with like colors inside out. Do not iron directly on graphic print.',
     isPublished: true,
-    imageUrl: '',
-    imageAlt: '',
+    images: [],
     sizes: {
       S: 20,
       M: 20,
@@ -112,35 +140,17 @@ export default function AdminProductsPage() {
     }
   };
 
-  const handleArchive = async (productId: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to archive "${name}"? It will be removed from storefront while preserving historical orders.`)) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/admin/products?id=${productId}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (data.success) {
-        setStatusMsg({ type: 'success', text: `Product "${name}" archived.` });
-        fetchProducts();
-      } else {
-        setStatusMsg({ type: 'error', text: data.error || 'Failed to archive' });
-      }
-    } catch (err) {
-      setStatusMsg({ type: 'error', text: 'Error archiving product' });
-    }
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Multiple Image Upload Handler
+  const handleMultipleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
 
     try {
       setUploadingImage(true);
       const fd = new FormData();
-      fd.append('file', file);
+      for (let i = 0; i < fileList.length; i++) {
+        fd.append('files', fileList[i]);
+      }
 
       const res = await fetch('/api/admin/upload', {
         method: 'POST',
@@ -148,21 +158,94 @@ export default function AdminProductsPage() {
       });
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.data?.files) {
+        const newImgs: ProductFormImage[] = data.data.files.map((f: any, idx: number) => ({
+          url: f.url,
+          altText: formData.name || 'LYVEN Apparel',
+          imageType: 'front',
+          isPrimary: formData.images.length === 0 && idx === 0,
+          displayOrder: formData.images.length + idx,
+        }));
+
         setFormData((prev) => ({
           ...prev,
-          imageUrl: data.data.url,
-          imageAlt: prev.imageAlt || prev.name || 'Product Image',
+          images: [...prev.images, ...newImgs],
         }));
-        setStatusMsg({ type: 'success', text: 'Image uploaded to Supabase Storage!' });
+
+        setStatusMsg({
+          type: 'success',
+          text: `Successfully uploaded ${data.data.files.length} image(s) to Supabase Storage!`,
+        });
       } else {
         setStatusMsg({ type: 'error', text: data.error || 'Image upload failed' });
       }
-    } catch (err) {
-      setStatusMsg({ type: 'error', text: 'Error uploading image to storage' });
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: err?.message || 'Error uploading images to storage' });
     } finally {
       setUploadingImage(false);
+      e.target.value = '';
     }
+  };
+
+  const handleAddImageUrl = () => {
+    if (!manualImageUrl.trim()) return;
+    const url = manualImageUrl.trim();
+    setFormData((prev) => ({
+      ...prev,
+      images: [
+        ...prev.images,
+        {
+          url,
+          altText: prev.name || 'Product Image',
+          imageType: 'front',
+          isPrimary: prev.images.length === 0,
+          displayOrder: prev.images.length,
+        },
+      ],
+    }));
+    setManualImageUrl('');
+  };
+
+  const handleSetPrimary = (index: number) => {
+    setFormData((prev) => {
+      const updated = prev.images.map((img, i) => ({
+        ...img,
+        isPrimary: i === index,
+      }));
+      // Put primary at index 0 for natural display priority
+      const primaryImg = updated[index];
+      const rest = updated.filter((_, i) => i !== index);
+      const reordered = [primaryImg, ...rest].map((img, i) => ({ ...img, displayOrder: i }));
+      return { ...prev, images: reordered };
+    });
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setFormData((prev) => {
+      const filtered = prev.images.filter((_, i) => i !== index);
+      if (filtered.length > 0 && !filtered.some((img) => img.isPrimary)) {
+        filtered[0].isPrimary = true;
+      }
+      return {
+        ...prev,
+        images: filtered.map((img, idx) => ({ ...img, displayOrder: idx })),
+      };
+    });
+  };
+
+  const handleMoveImage = (index: number, direction: 'left' | 'right') => {
+    setFormData((prev) => {
+      const targetIdx = direction === 'left' ? index - 1 : index + 1;
+      if (targetIdx < 0 || targetIdx >= prev.images.length) return prev;
+      const copy = [...prev.images];
+      const temp = copy[index];
+      copy[index] = copy[targetIdx];
+      copy[targetIdx] = temp;
+      return {
+        ...prev,
+        images: copy.map((img, idx) => ({ ...img, displayOrder: idx })),
+      };
+    });
   };
 
   const handleCreateProduct = async (e: React.FormEvent) => {
@@ -177,17 +260,6 @@ export default function AdminProductsPage() {
         quantity: Number(quantity) || 0,
       }));
 
-      const images = formData.imageUrl
-        ? [
-            {
-              url: formData.imageUrl,
-              altText: formData.imageAlt || formData.name,
-              imageType: 'front',
-              displayOrder: 0,
-            },
-          ]
-        : [];
-
       const payload = {
         name: formData.name,
         slug: formData.slug || formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -198,7 +270,13 @@ export default function AdminProductsPage() {
         fabric: formData.fabric,
         careInstructions: formData.careInstructions,
         isPublished: formData.isPublished,
-        images,
+        images: formData.images.map((img, idx) => ({
+          url: img.url,
+          altText: img.altText || formData.name,
+          imageType: img.imageType || 'front',
+          displayOrder: idx,
+          isPrimary: img.isPrimary,
+        })),
         variants: variantList,
       };
 
@@ -223,8 +301,7 @@ export default function AdminProductsPage() {
           fabric: '240 GSM French Terry Combed Cotton',
           careInstructions: 'Machine wash cold with like colors inside out. Do not iron directly on graphic print.',
           isPublished: true,
-          imageUrl: '',
-          imageAlt: '',
+          images: [],
           sizes: { S: 20, M: 20, L: 20, XL: 20, '2XL': 20 },
         });
         fetchProducts();
@@ -240,19 +317,27 @@ export default function AdminProductsPage() {
 
   const handleOpenEdit = (p: ProductWithMeta) => {
     setEditingProduct(p);
-    setFormData((prev) => ({
-      ...prev,
+    const existingImgs: ProductFormImage[] = (p.images || []).map((img, idx) => ({
+      url: img.url,
+      altText: img.alt || p.name,
+      imageType: img.type || 'front',
+      isPrimary: Boolean(img.isPrimary) || idx === 0,
+      displayOrder: img.order !== undefined ? img.order : idx,
+    }));
+
+    setFormData({
       name: p.name,
       slug: p.slug,
       description: p.description,
       price: (p.pricePaise / 100).toString(),
       category: p.category || 'Oversized Graphic T-Shirts',
       fit: p.fit || 'Oversized Boxy Silhouette',
+      fabric: '240 GSM French Terry Combed Cotton',
       careInstructions: p.careInstructions || '',
       isPublished: p.active,
-      imageUrl: p.images?.[0]?.url || '',
-      imageAlt: p.images?.[0]?.alt || p.name,
-    }));
+      images: existingImgs,
+      sizes: { S: 20, M: 20, L: 20, XL: 20, '2XL': 20 },
+    });
     setIsEditModalOpen(true);
   };
 
@@ -273,18 +358,14 @@ export default function AdminProductsPage() {
         category: formData.category,
         careInstructions: formData.careInstructions,
         isPublished: formData.isPublished,
+        images: formData.images.map((img, idx) => ({
+          url: img.url,
+          altText: img.altText || formData.name,
+          imageType: img.imageType || 'front',
+          displayOrder: idx,
+          isPrimary: img.isPrimary,
+        })),
       };
-
-      if (formData.imageUrl) {
-        payload.images = [
-          {
-            url: formData.imageUrl,
-            altText: formData.imageAlt || formData.name,
-            imageType: 'front',
-            displayOrder: 0,
-          },
-        ];
-      }
 
       const res = await fetch('/api/admin/products', {
         method: 'PATCH',
@@ -307,6 +388,169 @@ export default function AdminProductsPage() {
       setSubmitting(false);
     }
   };
+
+  const handleDeleteOrArchiveProduct = async (product: ProductWithMeta, permanent: boolean) => {
+    try {
+      setDeletingProduct(true);
+      const res = await fetch(`/api/admin/products?id=${product.id}&permanent=${permanent}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMsg({ type: 'success', text: data.message });
+        setDeleteModalProduct(null);
+        await fetchProducts();
+      } else {
+        setStatusMsg({ type: 'error', text: data.error || 'Failed to delete/archive product' });
+      }
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: err?.message || 'Delete operation error' });
+    } finally {
+      setDeletingProduct(false);
+    }
+  };
+
+  // Reusable Images Section UI for Modals
+  const renderImageManager = () => (
+    <div className="p-4 bg-neutral-950 rounded-xl border border-neutral-800 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="block text-[11px] font-mono uppercase tracking-wider text-[#C9A45C]">
+          Product Image Gallery ({formData.images.length} {formData.images.length === 1 ? 'image' : 'images'})
+        </span>
+        <span className="text-[10px] font-mono text-neutral-400">
+          The first image (or starred) serves as the primary storefront cover.
+        </span>
+      </div>
+
+      {/* Upload Controls */}
+      <div className="flex flex-col sm:flex-row items-center gap-2">
+        <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-mono uppercase tracking-wider rounded-xl border border-neutral-700 transition-colors">
+          <UploadCloud className="w-4 h-4 text-[#C9A45C]" />
+          {uploadingImage ? 'Uploading Files...' : 'Upload Image Files (Multi)'}
+          <input
+            type="file"
+            multiple
+            accept="image/png, image/jpeg, image/webp, image/avif"
+            onChange={handleMultipleImageUpload}
+            disabled={uploadingImage}
+            className="hidden"
+          />
+        </label>
+
+        <span className="text-xs text-neutral-500 font-mono">or paste URL:</span>
+
+        <div className="flex-1 flex items-center gap-1.5 w-full">
+          <input
+            type="text"
+            value={manualImageUrl}
+            onChange={(e) => setManualImageUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddImageUrl();
+              }
+            }}
+            placeholder="https://... or /image.png"
+            className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-[#C9A45C]"
+          />
+          <button
+            type="button"
+            onClick={handleAddImageUrl}
+            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl text-xs font-mono uppercase tracking-wider"
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {/* Image Gallery Grid */}
+      {formData.images.length > 0 ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2">
+          {formData.images.map((img, idx) => (
+            <div
+              key={`${img.url}-${idx}`}
+              className={`relative rounded-xl overflow-hidden bg-neutral-900 border transition-all ${
+                img.isPrimary
+                  ? 'border-[#C9A45C] ring-2 ring-[#C9A45C]/30 shadow-md'
+                  : 'border-neutral-800 hover:border-neutral-700'
+              }`}
+            >
+              {/* Image Preview */}
+              <div className="w-full aspect-[4/5] relative bg-black flex items-center justify-center">
+                <Image
+                  src={img.url}
+                  alt={img.altText || `Product Image ${idx + 1}`}
+                  fill
+                  className="object-contain p-1"
+                  unoptimized={img.url.startsWith('data:') || img.url.startsWith('/')}
+                />
+
+                {/* Primary Badge */}
+                {img.isPrimary && (
+                  <span className="absolute top-1.5 left-1.5 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#C9A45C] text-black text-[9px] font-mono font-bold tracking-wider uppercase">
+                    <Star className="w-2.5 h-2.5 fill-black" />
+                    Cover
+                  </span>
+                )}
+
+                {/* Position Index */}
+                <span className="absolute bottom-1.5 right-1.5 z-10 px-1 py-0.5 rounded bg-black/80 text-neutral-400 text-[9px] font-mono">
+                  #{idx + 1}
+                </span>
+              </div>
+
+              {/* Action Bar */}
+              <div className="p-1.5 bg-neutral-950 flex items-center justify-between gap-1 border-t border-neutral-800">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleMoveImage(idx, 'left')}
+                    disabled={idx === 0}
+                    className="p-1 text-neutral-400 hover:text-white disabled:opacity-30 rounded hover:bg-neutral-800"
+                    title="Move earlier"
+                  >
+                    <ArrowLeft className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMoveImage(idx, 'right')}
+                    disabled={idx === formData.images.length - 1}
+                    className="p-1 text-neutral-400 hover:text-white disabled:opacity-30 rounded hover:bg-neutral-800"
+                    title="Move later"
+                  >
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {!img.isPrimary && (
+                  <button
+                    type="button"
+                    onClick={() => handleSetPrimary(idx)}
+                    className="text-[9px] font-mono uppercase text-[#C9A45C] hover:underline"
+                  >
+                    Set Cover
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleRemoveImage(idx)}
+                  className="p-1 text-red-400 hover:text-red-300 rounded hover:bg-red-950/40"
+                  title="Remove image"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="p-6 text-center border border-dashed border-neutral-800 rounded-xl text-neutral-500 text-xs font-mono">
+          No images uploaded yet. Select files or paste URLs above.
+        </div>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -351,7 +595,7 @@ export default function AdminProductsPage() {
             Product Management
           </h1>
           <p className="text-xs text-neutral-400 mt-1">
-            Manage LYVEN drops, edit descriptions, upload high-res imagery, and monitor live variant stock.
+            Manage LYVEN drops, multi-image galleries, cover selections, and safe product archiving.
           </p>
         </div>
 
@@ -376,7 +620,9 @@ export default function AdminProductsPage() {
       {/* Products Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {products.map((product) => {
-          const primaryImg = product.images?.[0]?.url;
+          // Primary cover image is always first in the sorted array
+          const primaryImg = product.images?.find((img) => img.isPrimary)?.url || product.images?.[0]?.url;
+          const imageCount = product.images?.length || 0;
           const totalStock = product.totalStock ?? product.variants?.reduce((acc, v) => acc + v.quantity, 0) ?? 0;
 
           return (
@@ -388,7 +634,7 @@ export default function AdminProductsPage() {
             >
               <div className="p-6 space-y-4">
                 <div className="flex items-start gap-4">
-                  {/* Thumbnail */}
+                  {/* Thumbnail / Gallery Indicator */}
                   <div className="w-20 h-24 rounded-lg bg-neutral-950 border border-neutral-800 relative overflow-hidden shrink-0">
                     {primaryImg ? (
                       <Image
@@ -402,6 +648,11 @@ export default function AdminProductsPage() {
                       <div className="w-full h-full flex items-center justify-center text-[10px] text-neutral-600 font-mono">
                         NO IMAGE
                       </div>
+                    )}
+                    {imageCount > 1 && (
+                      <span className="absolute bottom-1 right-1 bg-black/85 text-[9px] font-mono px-1 rounded text-white border border-neutral-700">
+                        {imageCount} imgs
+                      </span>
                     )}
                   </div>
 
@@ -449,22 +700,26 @@ export default function AdminProductsPage() {
 
                 {/* Available Sizes Matrix */}
                 {product.variants && product.variants.length > 0 && (
-                  <div>
-                    <span className="text-[10px] uppercase font-mono text-neutral-400 block mb-2">
-                      Variant Stock by Size:
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-400">
+                      Live Size Availability
                     </span>
-                    <div className="grid grid-cols-5 gap-2">
+                    <div className="flex flex-wrap gap-2">
                       {product.variants.map((v) => (
                         <div
                           key={v.id}
-                          className={`p-2 rounded-lg text-center border ${
-                            v.quantity > 0
-                              ? 'bg-neutral-950 border-neutral-800'
-                              : 'bg-red-950/20 border-red-900/40 text-red-400'
-                          }`}
+                          className="px-2 py-1 rounded-md bg-neutral-950 border border-neutral-800 text-xs font-mono flex items-center gap-1.5"
                         >
-                          <span className="text-xs font-bold block">{v.size}</span>
-                          <span className="text-[10px] font-mono text-neutral-400 block mt-0.5">
+                          <span className="font-bold text-white">{v.size}</span>
+                          <span
+                            className={
+                              v.quantity > 5
+                                ? 'text-emerald-400'
+                                : v.quantity > 0
+                                ? 'text-amber-400'
+                                : 'text-red-400'
+                            }
+                          >
                             {v.quantity}
                           </span>
                         </div>
@@ -511,11 +766,11 @@ export default function AdminProductsPage() {
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => handleArchive(product.id, product.name)}
+                    onClick={() => setDeleteModalProduct(product)}
                     className="p-1.5 text-red-400 hover:text-red-300 rounded-lg bg-neutral-800 hover:bg-red-950/50"
-                    title="Archive Product"
+                    title="Delete / Archive Product"
                   >
-                    <Archive className="w-3.5 h-3.5" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -527,11 +782,11 @@ export default function AdminProductsPage() {
       {/* CREATE PRODUCT MODAL */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#0B0B0D] border border-neutral-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
+          <div className="bg-[#0B0B0D] border border-neutral-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
               <div>
                 <h3 className="text-xl font-bold text-white">Create New Product Drop</h3>
-                <p className="text-xs text-neutral-400">Add a new silhouette or graphic drop to LYVEN catalogue.</p>
+                <p className="text-xs text-neutral-400">Add a new streetwear silhouette with multi-angle imagery.</p>
               </div>
               <button
                 onClick={() => setIsCreateModalOpen(false)}
@@ -614,51 +869,8 @@ export default function AdminProductsPage() {
                 />
               </div>
 
-              {/* Image Upload */}
-              <div className="p-4 bg-neutral-950 rounded-xl border border-neutral-800 space-y-3">
-                <span className="block text-[11px] font-mono uppercase tracking-wider text-[#C9A45C]">
-                  Product Imagery (Supabase Storage)
-                </span>
-                <div className="flex flex-col sm:flex-row items-center gap-3">
-                  <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-mono uppercase tracking-wider rounded-xl border border-neutral-700">
-                    <UploadCloud className="w-4 h-4" />
-                    {uploadingImage ? 'Uploading...' : 'Upload Image File'}
-                    <input
-                      type="file"
-                      accept="image/png, image/jpeg, image/webp"
-                      onChange={handleImageUpload}
-                      disabled={uploadingImage}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-xs text-neutral-500">or enter image URL directly:</span>
-                  <input
-                    type="text"
-                    value={formData.imageUrl}
-                    onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
-                    placeholder="/dude-tshirt.png or https://..."
-                    className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-[#C9A45C]"
-                  />
-                </div>
-
-                {formData.imageUrl && (
-                  <div className="flex items-center gap-3 pt-2">
-                    <div className="w-12 h-14 bg-black border border-neutral-800 rounded relative overflow-hidden">
-                      <Image
-                        src={formData.imageUrl}
-                        alt="Preview"
-                        fill
-                        className="object-contain p-1"
-                        unoptimized
-                      />
-                    </div>
-                    <span className="text-xs font-mono text-emerald-400 flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" />
-                      Image loaded
-                    </span>
-                  </div>
-                )}
-              </div>
+              {/* Multi-Image Upload Section */}
+              {renderImageManager()}
 
               {/* Variant Stock Initial Quantities */}
               <div className="p-4 bg-neutral-950 rounded-xl border border-neutral-800 space-y-2">
@@ -712,11 +924,11 @@ export default function AdminProductsPage() {
       {/* EDIT PRODUCT MODAL */}
       {isEditModalOpen && editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-[#0B0B0D] border border-neutral-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
+          <div className="bg-[#0B0B0D] border border-neutral-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-6">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
               <div>
                 <h3 className="text-xl font-bold text-white">Edit Product</h3>
-                <p className="text-xs text-neutral-400">Modify details for {editingProduct.name}.</p>
+                <p className="text-xs text-neutral-400">Modify details, reorder images, or set a new cover for {editingProduct.name}.</p>
               </div>
               <button
                 onClick={() => setIsEditModalOpen(false)}
@@ -781,17 +993,8 @@ export default function AdminProductsPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-[11px] font-mono uppercase tracking-wider text-neutral-400 mb-1">
-                  Image URL
-                </label>
-                <input
-                  type="text"
-                  value={formData.imageUrl}
-                  onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
-                  className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-[#C9A45C]"
-                />
-              </div>
+              {/* Multi-Image Upload Section for Edit */}
+              {renderImageManager()}
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-neutral-800">
                 <button
@@ -810,6 +1013,64 @@ export default function AdminProductsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* SAFE DELETE / ARCHIVE CONFIRMATION MODAL */}
+      {deleteModalProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0B0B0D] border border-neutral-800 rounded-2xl w-full max-w-lg p-6 space-y-6">
+            <div className="flex items-center gap-3 border-b border-neutral-800 pb-4">
+              <div className="w-10 h-10 rounded-xl bg-red-950/60 border border-red-800/60 flex items-center justify-center text-red-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Manage Product: {deleteModalProduct.name}</h3>
+                <span className="text-[10px] font-mono uppercase text-neutral-400">
+                  Slug: /{deleteModalProduct.slug}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 text-xs text-neutral-300 space-y-2">
+              <p className="font-semibold text-white">Choose Deletion or Archiving:</p>
+              <ul className="space-y-1.5 list-disc list-inside text-neutral-400">
+                <li>
+                  <strong className="text-neutral-200">Archive (Recommended):</strong> Hides the product from the storefront while keeping all historical customer orders and revenue reports 100% intact.
+                </li>
+                <li>
+                  <strong className="text-neutral-200">Permanent Delete (Test Data):</strong> Only permitted if this product has <span className="underline font-bold text-white">zero</span> customer orders. If linked to any orders, it will automatically default to safe archiving to preserve order integrity.
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteModalProduct(null)}
+                disabled={deletingProduct}
+                className="w-full sm:w-auto px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-xl text-xs uppercase tracking-wider text-neutral-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteOrArchiveProduct(deleteModalProduct, false)}
+                disabled={deletingProduct}
+                className="w-full sm:w-auto px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs font-mono uppercase tracking-wider"
+              >
+                {deletingProduct ? 'Archiving...' : 'Archive Product (Safe)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteOrArchiveProduct(deleteModalProduct, true)}
+                disabled={deletingProduct}
+                className="w-full sm:w-auto px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl text-xs font-mono uppercase tracking-wider"
+              >
+                {deletingProduct ? 'Processing...' : 'Permanently Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
